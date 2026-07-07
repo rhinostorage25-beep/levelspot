@@ -1,0 +1,490 @@
+{
+  "generatedFrom": "Data/van_dimensions_levelspot_v2.csv + Data/coachbuilt_chassis_v1.csv via scripts/gen-seed.js",
+  "alkoTypicalRearTrackMM": 1920,
+  "setupPresets": [
+    {
+      "id": "tt6",
+      "name": "VW T5 / T6 / T6.1",
+      "silhouette": "lowtop",
+      "gen_id": "transporter-t6"
+    },
+    {
+      "id": "transit",
+      "name": "Ford Transit Custom",
+      "silhouette": "compact",
+      "gen_id": "transit-custom-g2"
+    },
+    {
+      "id": "ducato",
+      "name": "Fiat Ducato",
+      "silhouette": "hightop",
+      "gen_id": "ducato-x250-x290-s8"
+    },
+    {
+      "id": "sprinter",
+      "name": "Mercedes Sprinter / Crafter",
+      "silhouette": "hightop",
+      "gen_id": "sprinter-w907"
+    },
+    {
+      "id": "trafic",
+      "name": "Renault Trafic",
+      "silhouette": "compact",
+      "gen_id": "trafic-3"
+    },
+    {
+      "id": "vivaro",
+      "name": "Vauxhall Vivaro",
+      "silhouette": "compact",
+      "gen_id": "vivaro-c-emp2"
+    }
+  ],
+  "generations": [
+    {
+      "gen_id": "ducato-x250-x290-s8",
+      "make": "Fiat",
+      "model": "Ducato",
+      "generation": "X250/X290/Series 8-9",
+      "year_from": 2006,
+      "year_to": null,
+      "badges": "Peugeot Boxer / Citroen Relay / Vauxhall Movano (2021+) / Toyota Proace Max",
+      "wheelbases_mm": [
+        3000,
+        3450,
+        4035
+      ],
+      "track_front_mm": 1810,
+      "track_rear_mm": 1790,
+      "track_confidence": "high",
+      "camper_relevance": "very-high",
+      "notes": "Sevel platform; dims unchanged 2006-present across facelifts and all 5 badges. Track per Stellantis official spec sheet, same across L1-L4. Dominant UK/EU camper base."
+    },
+    {
+      "gen_id": "ducato-244",
+      "make": "Fiat",
+      "model": "Ducato",
+      "generation": "230/244 (pre-Sevel-X250)",
+      "year_from": 1994,
+      "year_to": 2006,
+      "badges": "Peugeot Boxer / Citroen Relay (same era)",
+      "wheelbases_mm": [
+        2850,
+        3200,
+        3700
+      ],
+      "track_front_mm": 1720,
+      "track_rear_mm": 1720,
+      "track_confidence": "med",
+      "camper_relevance": "low",
+      "notes": "Older self-builds only. Track per Ducato II spec (truck1.eu). Wheelbase list TBC - verify before enabling in-app."
+    },
+    {
+      "gen_id": "sprinter-w907",
+      "make": "Mercedes-Benz",
+      "model": "Sprinter",
+      "generation": "W907/W910",
+      "year_from": 2018,
+      "year_to": null,
+      "badges": null,
+      "wheelbases_mm": [
+        3259,
+        3924,
+        4325
+      ],
+      "track_front_mm": 1759,
+      "track_rear_mm": 1770,
+      "track_confidence": "med",
+      "camper_relevance": "high",
+      "notes": "Track from auto-data (FWD Compact). RWD and DRW variants differ slightly - treat as typical. 3259 wheelbase is FWD-only."
+    },
+    {
+      "gen_id": "sprinter-w906",
+      "make": "Mercedes-Benz",
+      "model": "Sprinter",
+      "generation": "W906 (NCV3)",
+      "year_from": 2006,
+      "year_to": 2018,
+      "badges": "VW Crafter I (2006-2017 twin)",
+      "wheelbases_mm": [
+        3250,
+        3665,
+        4325
+      ],
+      "track_front_mm": null,
+      "track_rear_mm": null,
+      "track_confidence": "tbc",
+      "camper_relevance": "very-high",
+      "notes": "Huge used-camper population. Crafter I is the same vehicle. Track TBC."
+    },
+    {
+      "gen_id": "transporter-t5",
+      "make": "Volkswagen",
+      "model": "Transporter",
+      "generation": "T5",
+      "year_from": 2003,
+      "year_to": 2015,
+      "badges": null,
+      "wheelbases_mm": [
+        3000,
+        3400
+      ],
+      "track_front_mm": null,
+      "track_rear_mm": null,
+      "track_confidence": "tbc",
+      "camper_relevance": "very-high",
+      "notes": "Biggest UK used-camper base by volume. Track TBC (likely close to T6's 1659/1628 - same PQ platform - but verify)."
+    },
+    {
+      "gen_id": "transporter-t6",
+      "make": "Volkswagen",
+      "model": "Transporter",
+      "generation": "T6/T6.1",
+      "year_from": 2015,
+      "year_to": 2024,
+      "badges": null,
+      "wheelbases_mm": [
+        3000,
+        3400
+      ],
+      "track_front_mm": 1659,
+      "track_rear_mm": 1628,
+      "track_confidence": "med",
+      "camper_relevance": "very-high",
+      "notes": "Track from VW German technical data; some configs list rear 1659. Same wheelbases as T5."
+    },
+    {
+      "gen_id": "transit-custom-g1",
+      "make": "Ford",
+      "model": "Transit Custom",
+      "generation": "Gen 1",
+      "year_from": 2012,
+      "year_to": 2023,
+      "badges": null,
+      "wheelbases_mm": [
+        2933,
+        3300
+      ],
+      "track_front_mm": null,
+      "track_rear_mm": null,
+      "track_confidence": "tbc",
+      "camper_relevance": "high",
+      "notes": "Most used Customs are this gen. Track TBC."
+    },
+    {
+      "gen_id": "transit-custom-g2",
+      "make": "Ford",
+      "model": "Transit Custom",
+      "generation": "Gen 2",
+      "year_from": 2023,
+      "year_to": null,
+      "badges": "VW Transporter T7 (2024+ is a badge/platform twin)",
+      "wheelbases_mm": [
+        3100,
+        3500
+      ],
+      "track_front_mm": 1730,
+      "track_rear_mm": 1724,
+      "track_confidence": "high",
+      "camper_relevance": "med",
+      "notes": "Track per carwow/Ford German spec. Note: the new VW Transporter T7 is built on this platform - NOT a T6 successor dimensionally."
+    },
+    {
+      "gen_id": "trafic-3",
+      "make": "Renault",
+      "model": "Trafic",
+      "generation": "III (X82)",
+      "year_from": 2014,
+      "year_to": null,
+      "badges": "Nissan NV300/Primastar / Vauxhall Vivaro B (2014-2019) / Fiat Talento (2016-2020)",
+      "wheelbases_mm": [
+        3098,
+        3498
+      ],
+      "track_front_mm": 1615,
+      "track_rear_mm": 1628,
+      "track_confidence": "med",
+      "camper_relevance": "high",
+      "notes": "Vivaro B and Talento are badge twins of THIS - not of the 2019+ Stellantis Vivaro C."
+    },
+    {
+      "gen_id": "trafic-2",
+      "make": "Renault",
+      "model": "Trafic",
+      "generation": "II (X83)",
+      "year_from": 2001,
+      "year_to": 2014,
+      "badges": "Vauxhall Vivaro A / Nissan Primastar",
+      "wheelbases_mm": [
+        3098,
+        3498
+      ],
+      "track_front_mm": null,
+      "track_rear_mm": null,
+      "track_confidence": "tbc",
+      "camper_relevance": "med",
+      "notes": "Same nominal wheelbases as III. Track TBC."
+    },
+    {
+      "gen_id": "vivaro-c-emp2",
+      "make": "Vauxhall",
+      "model": "Vivaro",
+      "generation": "C (Stellantis EMP2)",
+      "year_from": 2019,
+      "year_to": null,
+      "badges": "Peugeot Expert / Citroen Dispatch (2016+) / Toyota Proace (2016+) / Fiat Scudo (2022+)",
+      "wheelbases_mm": [
+        2925,
+        3275
+      ],
+      "track_front_mm": 1627,
+      "track_rear_mm": 1600,
+      "track_confidence": "high",
+      "camper_relevance": "med",
+      "notes": "Track per auto-data. Expert/Dispatch/Proace on this platform from 2016; Vivaro joined 2019. Single roof height."
+    },
+    {
+      "gen_id": "vito-w447",
+      "make": "Mercedes-Benz",
+      "model": "Vito",
+      "generation": "W447",
+      "year_from": 2014,
+      "year_to": null,
+      "badges": null,
+      "wheelbases_mm": [
+        3200,
+        3430
+      ],
+      "track_front_mm": 1630,
+      "track_rear_mm": 1630,
+      "track_confidence": "med",
+      "camper_relevance": "med",
+      "notes": "Track per German spec sources (front=rear)."
+    },
+    {
+      "gen_id": "vito-w639",
+      "make": "Mercedes-Benz",
+      "model": "Vito",
+      "generation": "W639",
+      "year_from": 2003,
+      "year_to": 2014,
+      "badges": null,
+      "wheelbases_mm": [
+        3200,
+        3430
+      ],
+      "track_front_mm": null,
+      "track_rear_mm": null,
+      "track_confidence": "tbc",
+      "camper_relevance": "low",
+      "notes": "Track TBC."
+    },
+    {
+      "gen_id": "transit-fullsize-g4",
+      "make": "Ford",
+      "model": "Transit",
+      "generation": "Gen 4 (V363)",
+      "year_from": 2014,
+      "year_to": null,
+      "badges": null,
+      "wheelbases_mm": [
+        3300,
+        3750,
+        3954
+      ],
+      "track_front_mm": 1732,
+      "track_rear_mm": 1759,
+      "track_confidence": "med",
+      "camper_relevance": "high",
+      "notes": "Track per carwow (SRW). DRW rear axle differs - treat as typical. Very common self-build base."
+    },
+    {
+      "gen_id": "transit-fullsize-g3",
+      "make": "Ford",
+      "model": "Transit",
+      "generation": "Gen 3 (V347/8)",
+      "year_from": 2000,
+      "year_to": 2014,
+      "badges": null,
+      "wheelbases_mm": [
+        2933,
+        3300,
+        3750
+      ],
+      "track_front_mm": null,
+      "track_rear_mm": null,
+      "track_confidence": "tbc",
+      "camper_relevance": "med",
+      "notes": "Older self-builds. Wheelbase list and track TBC."
+    },
+    {
+      "gen_id": "master-x62",
+      "make": "Renault",
+      "model": "Master",
+      "generation": "III (X62)",
+      "year_from": 2010,
+      "year_to": 2024,
+      "badges": "Vauxhall Movano B (2010-2021) / Nissan NV400/Interstar",
+      "wheelbases_mm": [
+        3182,
+        3682,
+        4332
+      ],
+      "track_front_mm": null,
+      "track_rear_mm": null,
+      "track_confidence": "tbc",
+      "camper_relevance": "high",
+      "notes": "14-year production run - most used Masters are this gen. Track TBC (~1750/1730 FWD, verify). NOTE: the v1 CSV's 'new-gen Master' rows actually used these X62 wheelbases."
+    },
+    {
+      "gen_id": "master-2024",
+      "make": "Renault",
+      "model": "Master",
+      "generation": "IV",
+      "year_from": 2024,
+      "year_to": null,
+      "badges": "Nissan Interstar",
+      "wheelbases_mm": [
+        3585,
+        4215
+      ],
+      "track_front_mm": 1770,
+      "track_rear_mm": null,
+      "track_confidence": "med",
+      "camper_relevance": "low",
+      "notes": "Per meinauto German spec: rear track varies 1615-1730 by config. Too new to matter for used campers yet."
+    },
+    {
+      "gen_id": "crafter-2",
+      "make": "Volkswagen",
+      "model": "Crafter",
+      "generation": "II (SY/SZ)",
+      "year_from": 2017,
+      "year_to": null,
+      "badges": "MAN TGE",
+      "wheelbases_mm": [
+        3640,
+        4490
+      ],
+      "track_front_mm": 1710,
+      "track_rear_mm": 1716,
+      "track_confidence": "med",
+      "camper_relevance": "med",
+      "notes": "Track per carexpert. Crafter I (2006-2017) is a Sprinter W906 twin - see sprinter-w906 row."
+    }
+  ],
+  "chassisTypes": [
+    {
+      "chassis_id": "ducato-standard",
+      "chassis_type": "Standard van chassis",
+      "fits_platforms": "Ducato/Boxer/Relay (Sevel 2006+)",
+      "wheelbase_range_mm": "3000-4035",
+      "front_track_mm": 1810,
+      "rear_track_mm_min": 1790,
+      "rear_track_mm_max": 1790,
+      "rear_track_confidence": "high",
+      "axle_config": "single",
+      "notes": "Unchanged from panel van (see van_dimensions_levelspot_v2.csv ducato-x250-x290-s8). Front track same across all Sevel chassis variants below - AL-KO/OEM motorhome conversions only ever touch the rear."
+    },
+    {
+      "chassis_id": "ducato-oem-motorhome",
+      "chassis_type": "Fiat factory 'Motorhome' chassis-cab",
+      "fits_platforms": "Ducato (2006+, Fiat-branded only - not confirmed for Boxer/Relay badge)",
+      "wheelbase_range_mm": "varies-4-options",
+      "front_track_mm": 1810,
+      "rear_track_mm_min": 1980,
+      "rear_track_mm_max": 1980,
+      "rear_track_confidence": "high",
+      "axle_config": "single",
+      "notes": "Fiat's own lighter, lower-ground-clearance (145mm) chassis-cab for coachbuilders NOT using AL-KO. Source: Practical Motorhome 'Know your base vehicles'. Distinct from the AL-KO product below despite similar rear track figure - do not merge."
+    },
+    {
+      "chassis_id": "alko-single-sevel",
+      "chassis_type": "AL-KO single-axle low-frame",
+      "fits_platforms": "Ducato/Boxer/Relay, via AL-KO chassis technology (co-branded w/ Fiat/PSA)",
+      "wheelbase_range_mm": "varies",
+      "front_track_mm": 1810,
+      "rear_track_mm_min": 1860,
+      "rear_track_mm_max": 1980,
+      "rear_track_confidence": "med",
+      "axle_config": "single",
+      "notes": "AL-KO's own rear-track options are ~1860 and ~1980mm per their commercial-vehicle brochure (486/498 figures found were likely OCR'd from 186.0/198.0cm). Frame lowered vs standard chassis; independent torsion-bar rear suspension replaces the leaf-spring rigid axle. THE most common chassis under UK/EU coachbuilt low-profile and A-class motorhomes - e.g. every Swift Bolero used this, all AL-KO-chassis models generally."
+    },
+    {
+      "chassis_id": "alko-single-sprinter",
+      "chassis_type": "AL-KO single-axle low-frame",
+      "fits_platforms": "Mercedes Sprinter (907/906)",
+      "wheelbase_range_mm": "varies",
+      "front_track_mm": 2020,
+      "rear_track_mm_min": 2170,
+      "rear_track_mm_max": 2230,
+      "rear_track_confidence": "low",
+      "axle_config": "single",
+      "notes": "Source states rear track 'increased by up to 210mm' vs standard Sprinter (2020mm front / ~2020mm rear stock) - exact figure not confirmed, treat range as indicative only pending a real AL-KO Sprinter spec sheet."
+    },
+    {
+      "chassis_id": "alko-tandem",
+      "chassis_type": "AL-KO tandem (twin) rear axle",
+      "fits_platforms": "Ducato-based (confirmed: Hymer B694/B774); also used by other large A-class/tag-axle motorhomes across brands",
+      "wheelbase_range_mm": "3800+",
+      "front_track_mm": 1810,
+      "rear_track_mm_min": 1980,
+      "rear_track_mm_max": null,
+      "rear_track_confidence": "low",
+      "axle_config": "tandem",
+      "notes": "Twin rear axle for the longest/heaviest coachbuilts (>7.5m typical). Geometry model needs a THIRD axle plane for these - the app's four-point/three-point models don't cover tandem-rear vehicles; flag as a known gap, not a v1 target given 'international/exotic vehicle data' is already out of scope."
+    }
+  ],
+  "rampProfiles": [
+    {
+      "id": "default",
+      "name": "Default steps",
+      "steps_mm": [
+        44,
+        78,
+        112
+      ],
+      "pro": false
+    },
+    {
+      "id": "thule",
+      "name": "Thule",
+      "steps_mm": [
+        44,
+        78,
+        112
+      ],
+      "pro": true
+    },
+    {
+      "id": "milenco",
+      "name": "Milenco Trident",
+      "steps_mm": [
+        40,
+        110,
+        170
+      ],
+      "pro": true
+    },
+    {
+      "id": "vonhaus",
+      "name": "VonHaus",
+      "steps_mm": [
+        40,
+        70,
+        100
+      ],
+      "pro": true
+    },
+    {
+      "id": "fiamma",
+      "name": "Fiamma",
+      "steps_mm": [
+        40,
+        65,
+        90,
+        115
+      ],
+      "pro": true
+    }
+  ]
+}

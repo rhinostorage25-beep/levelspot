@@ -1,0 +1,44 @@
+# XcodeGen project definition. On a Mac: `brew install xcodegen && xcodegen generate`
+# then open LevelSpot.xcodeproj. Keeping the project declarative means no binary
+# project.pbxproj merge pain and the whole tree stays reviewable as text.
+name: LevelSpot
+options:
+  bundleIdPrefix: uk.co.levelspot
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+packages:
+  LevelSpotCore:
+    path: LevelSpotCore
+targets:
+  LevelSpot:
+    type: application
+    platform: iOS
+    sources:
+      - LevelSpot
+    dependencies:
+      - package: LevelSpotCore
+    info:
+      path: LevelSpot/Info.plist
+      properties:
+        UILaunchScreen: {}
+        CFBundleDisplayName: LevelSpot
+        NSLocationWhenInUseUsageDescription: >-
+          LevelSpot uses your position only to recognise pitches you have levelled before.
+          Nothing is shared with other users.
+        ITSAppUsesNonExemptEncryption: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: uk.co.levelspot.app
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
+schemes:
+  LevelSpot:
+    build:
+      targets:
+        LevelSpot: all
+    test:
+      targets:
+        - package: LevelSpotCore/LevelSpotCoreTests

@@ -1,0 +1,23 @@
+# GitHub Actions: compile the iOS app + run LevelSpotCore tests on a macOS runner.
+# Lets a Windows-only workflow verify Swift builds without local Apple hardware:
+# push this Code/ tree to a GitHub repo with this file at .github/workflows/ios-build.yml
+name: ios-build
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Core tests (the cross-platform contract vectors)
+        run: swift test --package-path LevelSpotCore
+      - name: Build app (no signing)
+        run: >
+          xcodebuild -project LevelSpot.xcodeproj -scheme LevelSpot
+          -destination 'platform=iOS Simulator,name=iPhone 15'
+          CODE_SIGNING_ALLOWED=NO build

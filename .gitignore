@@ -1,0 +1,19 @@
+# Xcode / Swift
+*.xcodeproj/
+!project.yml
+.build/
+DerivedData/
+*.xcresult
+.swiftpm/
+
+# Secrets never live in this repo: DVSA credentials go in Supabase function secrets,
+# Supabase keys go in SupabaseAPI.swift locally (placeholder committed empty).
+.env
+*.p8
+*.p12
+*.mobileprovision
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
