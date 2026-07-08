@@ -12,9 +12,12 @@ struct SavePitchSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(LocationService.self) private var location
     @Environment(ConnectivityMonitor.self) private var connectivity
+    @Environment(EntitlementStore.self) private var entitlements
 
     @State private var rating = 0
     @State private var siteName = ""
+    @State private var capturedSun: Int?
+    @State private var capturedView: Int?
 
     var body: some View {
         NavigationStack {
@@ -59,6 +62,10 @@ struct SavePitchSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                if entitlements.isPro {
+                    proHeadingCapture
+                }
                 Spacer()
             }
             .navigationTitle("Rate This Pitch")
@@ -84,9 +91,59 @@ struct SavePitchSheet: View {
             corners: (corners.fl, corners.fr, corners.rl, corners.rr),
             rating: rating, siteName: siteName
         )
+        // Pro sun/view headings, if the user logged them (nil otherwise — the free tier
+        // never reaches this UI). Server RLS re-enforces the gate on sync regardless.
+        record.sunHeading = capturedSun
+        record.viewHeading = capturedView
         modelContext.insert(record)
         Haptics.saved()
         dismiss()
+    }
+
+    // Pro-only: point the top of the phone at the sun / the view and tap to log that
+    // compass heading. Optional — a pitch is perfectly valid with neither. Uses the same
+    // live heading (`location.headingDeg`) that the level scan reads, so no new plumbing.
+    @ViewBuilder
+    private var proHeadingCapture: some View {
+        VStack(spacing: 10) {
+            Text("Sun & view (optional)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            captureButton(symbol: "sun.max.fill", label: "sun", tint: Theme.sun,
+                          value: capturedSun) { capturedSun = location.headingDeg }
+            captureButton(symbol: "mountain.2.fill", label: "view", tint: Theme.view,
+                          value: capturedView) { capturedView = location.headingDeg }
+            Text(location.headingDeg == nil
+                 ? "Point the top of your phone at the sun or the view, then tap — waiting for the compass…"
+                 : "Point the top of your phone at the sun or the view, then tap Log.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal)
+    }
+
+    private func captureButton(symbol: String, label: String, tint: Color,
+                               value: Int?, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            Haptics.saved()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).foregroundStyle(tint).frame(width: 22)
+                Text(value.map { "Best \(label): \($0)°" } ?? "Log best \(label) heading")
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: value == nil ? "location.north.line" : "checkmark.circle.fill")
+                    .foregroundStyle(value == nil ? Color.secondary : tint)
+            }
+            .padding(12)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(location.headingDeg == nil)
     }
 }
 

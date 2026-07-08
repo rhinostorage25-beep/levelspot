@@ -1,0 +1,56 @@
+# Codemagic CI/CD — build LevelSpot on a cloud Mac and publish to TestFlight.
+# No local Mac required. This file defines the build in-repo; the SECRETS live in the
+# Codemagic UI (never here), the same way DVSA creds live only in Supabase, not the repo.
+#
+# ── ONE-TIME SETUP IN THE CODEMAGIC UI (needs the Apple Developer account first) ──────────
+#  1. Apps → add the `rhinostorage25-beep/levelspot` GitHub repo.
+#  2. Teams → Integrations → App Store Connect → add an API key (.p8 issuer/key from
+#     App Store Connect). Name it exactly `LevelSpot ASC key` (referenced below).
+#  3. In App Store Connect, create the app record with bundle id `uk.co.levelspot.app`,
+#     then paste its numeric Apple ID into APP_STORE_APP_ID below.
+# Nothing here works until the £79/yr Apple Developer Program enrolment is approved.
+# ──────────────────────────────────────────────────────────────────────────────────────────
+
+workflows:
+  ios-testflight:
+    name: LevelSpot iOS → TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2       # Codemagic free-tier macOS instance
+    integrations:
+      app_store_connect: LevelSpot ASC key   # <- must match the integration name in step 2
+    environment:
+      xcode: latest
+      vars:
+        XCODE_SCHEME: "LevelSpot"
+        BUNDLE_ID: "uk.co.levelspot.app"
+        APP_STORE_APP_ID: 0000000000  # <- TODO: replace with the numeric app id from App Store Connect
+    scripts:
+      - name: Install XcodeGen & generate the project
+        # Same generation step CI already does; the .xcodeproj is not committed.
+        script: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Run LevelSpotCore contract tests
+        # The 11 cross-platform vectors — a red test here should stop the release.
+        script: swift test --package-path LevelSpotCore
+      - name: Fetch signing files (automatic, via the ASC API key)
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Set the TestFlight build number
+        script: |
+          BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APP_ID" || echo 0)
+          agvtool new-version -all $(($BUILD_NUMBER + 1))
+      - name: Build the signed IPA
+        script: |
+          xcode-project build-ipa --project "LevelSpot.xcodeproj" --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # Beta review is only needed for external testers; internal testers get it immediately.

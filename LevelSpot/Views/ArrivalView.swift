@@ -88,12 +88,14 @@ struct ArrivalView: View {
                        locked: false)
             Divider().padding(.leading, 52)
             headingRow(color: Theme.sun, title: "Best sun",
-                       detail: pitch.sunHeading.map { "Heading \($0)°" } ?? "Log on your next visit",
-                       locked: !entitlements.isPro)
+                       detail: headingDetail(pitch.sunHeading, thing: "sun"),
+                       locked: !entitlements.isPro,
+                       capture: canLog(pitch.sunHeading) ? { logHeading(pitch, \.sunHeading) } : nil)
             Divider().padding(.leading, 52)
             headingRow(color: Theme.view, title: "Best view",
-                       detail: pitch.viewHeading.map { "Heading \($0)°" } ?? "Log on your next visit",
-                       locked: !entitlements.isPro)
+                       detail: headingDetail(pitch.viewHeading, thing: "view"),
+                       locked: !entitlements.isPro,
+                       capture: canLog(pitch.viewHeading) ? { logHeading(pitch, \.viewHeading) } : nil)
         }
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
 
@@ -143,9 +145,11 @@ struct ArrivalView: View {
                                       longitude: base.longitude + sin(rad) * d)
     }
 
-    private func headingRow(color: Color, title: String, detail: String, locked: Bool) -> some View {
+    private func headingRow(color: Color, title: String, detail: String, locked: Bool,
+                            capture: (() -> Void)? = nil) -> some View {
         Button {
             if locked { showPaywall = true }
+            else { capture?() }
         } label: {
             HStack(spacing: 12) {
                 Circle().fill(locked ? Color(.systemGray3) : color).frame(width: 26, height: 26)
@@ -167,12 +171,42 @@ struct ArrivalView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+                } else if capture != nil {
+                    // Pro user, value not logged yet: a live "Log" affordance.
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.north.line").font(.caption2)
+                        Text("Log").font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
             .padding(14)
         }
         .buttonStyle(.plain)
-        .disabled(!locked)
+        .disabled(!locked && capture == nil)
+    }
+
+    private func canLog(_ value: Int?) -> Bool {
+        entitlements.isPro && value == nil && location.headingDeg != nil
+    }
+
+    private func headingDetail(_ value: Int?, thing: String) -> String {
+        if let v = value { return "Heading \(v)°" }
+        if entitlements.isPro {
+            return location.headingDeg == nil
+                ? "Point at the \(thing) to log — waiting for the compass"
+                : "Tap Log — point the phone at the \(thing)"
+        }
+        return "Log on your next visit"
+    }
+
+    private func logHeading(_ pitch: PitchRecord, _ keyPath: ReferenceWritableKeyPath<PitchRecord, Int?>) {
+        guard let h = location.headingDeg else { return }
+        pitch[keyPath: keyPath] = h
+        pitch.synced = false          // mark for re-upload on the next sync pass
+        Haptics.saved()
     }
 
     private func conflictExists(_ pitch: PitchRecord) -> Bool {
