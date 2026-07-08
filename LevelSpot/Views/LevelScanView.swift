@@ -16,10 +16,10 @@ struct LevelScanView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
-                banner
-                instructionCard
-                frontBackRow
+            VStack(spacing: 16) {
+                verdictBanner
+                vanCard
+                stepsCard
                 detailsSection
                 Text("Audio and haptic cues guide you as you adjust — no need to keep checking the screen.")
                     .font(.caption)
@@ -84,99 +84,217 @@ struct LevelScanView: View {
                                 wheelbaseMM: Double(config.wheelbaseMM))
     }
 
-    // MARK: - Pieces
+    // MARK: - Verdict banner (reflects BOTH axes — never green while one side is out)
 
-    private var banner: some View {
-        let (text, color): (String, Color) = {
-            if advice.isLevel { return ("You're level — nice work", Theme.levelGreen) }
-            if let wheel = advice.wheel { return ("\(wheel.wheelName) needs a ramp — drive up slowly", .secondary) }
-            return ("Side-to-side sorted — check front-to-back next", .secondary)
+    private var verdictBanner: some View {
+        let (text, tint, bg, icon): (String, Color, Color, String) = {
+            if advice.beyondRamp {
+                return ("Too steep here — reposition the van", Theme.needsBigRamp,
+                        Theme.needsBigRamp.opacity(0.14), "exclamationmark.triangle.fill")
+            }
+            if advice.isLevel {
+                return ("You're level — nice work", Theme.levelGreen,
+                        Theme.levelGreen.opacity(0.14), "checkmark.circle.fill")
+            }
+            return ("Not level yet — follow the steps below", Color(.secondaryLabel),
+                    Color(.secondarySystemGroupedBackground), "arrow.down.to.line")
         }()
-        return Text(text)
-            .font(.callout.weight(.semibold))
-            .foregroundStyle(color)
-            .frame(maxWidth: .infinity)
-            .padding(12)
-            .background(advice.isLevel ? Theme.levelGreen.opacity(0.14) : Color(.secondarySystemGroupedBackground),
-                        in: RoundedRectangle(cornerRadius: 14))
+        return HStack(spacing: 8) {
+            Image(systemName: icon).foregroundStyle(tint)
+            Text(text).font(.callout.weight(.semibold)).foregroundStyle(tint)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(bg, in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private var instructionCard: some View {
-        VStack(spacing: 16) {
-            Text(advice.wheel.map { "\($0.wheelName) needs a ramp" } ?? "No ramp needed here")
-                .font(.headline)
-            HStack(spacing: 24) {
-                cornerDiagram
-                VStack(spacing: 4) {
-                    Text(advice.wheel.map { "\($0.placementCM)cm" } ?? "Flat")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .foregroundStyle(advice.wheel == nil ? Theme.levelGreen : severityColor)
-                        .contentTransition(.numericText())
-                    Text(advice.wheel == nil ? "no ramp needed" : "out from the tyre")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+    // MARK: - Van card (top-view diagram + the two live tilt angles)
+
+    private var vanCard: some View {
+        HStack(alignment: .center, spacing: 20) {
+            vanDiagram
+            tiltReadout
         }
         .frame(maxWidth: .infinity)
         .padding(20)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(alignment: .topTrailing) {
-            if config.usingTypicalDims {
-                Text("ESTIMATED")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 6))
-                    .padding(14)
+        .overlay(alignment: .topTrailing) { estimatedBadge }
+    }
+
+    private var vanDiagram: some View {
+        VStack(spacing: 5) {
+            Text("FRONT").font(.system(size: 10, weight: .heavy)).tracking(2).foregroundStyle(.tertiary)
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.tertiarySystemFill))
+                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color(.separator), lineWidth: 1))
+                VStack {
+                    HStack { tyre(.front, .left); Spacer(); tyre(.front, .right) }
+                    Spacer()
+                    HStack { tyre(.rear, .left); Spacer(); tyre(.rear, .right) }
+                }
+                .padding(12)
             }
+            .frame(width: 132, height: 190)
+            Text("REAR").font(.system(size: 10, weight: .heavy)).tracking(2).foregroundStyle(.tertiary)
         }
     }
 
-    private var severityColor: Color {
-        guard let step = advice.wheel?.stepMM,
-              let index = config.activeStepsMM.firstIndex(of: step) else { return Theme.needsRamp }
-        return index >= config.activeStepsMM.count - 1 ? Theme.needsBigRamp : Theme.needsRamp
-    }
-
-    private var cornerDiagram: some View {
-        let lowFL = advice.wheel?.end == .front && advice.wheel?.side == .left
-        let lowFR = advice.wheel?.end == .front && advice.wheel?.side == .right
-        let lowRL = advice.wheel?.end == .rear && advice.wheel?.side == .left
-        let lowRR = advice.wheel?.end == .rear && advice.wheel?.side == .right
-        return ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Color(.tertiaryLabel), lineWidth: 1.6)
-            VStack {
-                HStack { dot(lowFL); Spacer(); dot(lowFR) }
-                Spacer()
-                HStack { dot(lowRL); Spacer(); dot(lowRR) }
-            }
-            .padding(8)
+    /// A wheel: coloured by how far this corner sits below the highest one (from the rigid-body
+    /// corner maths), with the recommended ramp step badged on the wheels that actually get one.
+    private func tyre(_ end: End, _ side: Side) -> some View {
+        let step = stepBadge(end, side)
+        let color = wheelColor(end, side)
+        return VStack(spacing: 4) {
+            if end == .rear, let step { stepPill(step, color) }
+            RoundedRectangle(cornerRadius: 3).fill(color).frame(width: 14, height: 30)
+            if end == .front, let step { stepPill(step, color) }
         }
-        .frame(width: 58, height: 104)
     }
 
-    private func dot(_ isLow: Bool) -> some View {
-        Circle()
-            .fill(isLow ? Theme.needsRamp : (advice.isLevel ? Theme.levelGreen : Color(.tertiaryLabel)))
-            .frame(width: 14, height: 14)
+    private func stepPill(_ mm: Int, _ color: Color) -> some View {
+        Text("\(mm)mm")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(color, in: Capsule())
     }
 
-    private var frontBackRow: some View {
-        HStack {
-            if let step = advice.longStepMM, let placement = advice.longPlacementCM, let end = advice.lowEnd {
-                Text("Front to back: \(placement)cm out under the \(end == .front ? "front" : "rear") wheels · \(step)mm step")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Front to back: level").foregroundStyle(Theme.levelGreen)
-            }
-            Spacer()
+    private var tiltReadout: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            tiltStat(title: "Side-to-side", deg: motion.rollDeg, detail: rollDetail,
+                     axisLevel: advice.wheel == nil && !advice.lateralBeyondRamp,
+                     beyond: advice.lateralBeyondRamp)
+            tiltStat(title: "Front-to-back", deg: motion.pitchDeg, detail: pitchDetail,
+                     axisLevel: advice.longStepMM == nil && !advice.longBeyondRamp,
+                     beyond: advice.longBeyondRamp)
         }
-        .font(.footnote)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tiltStat(title: String, deg: Double, detail: String,
+                          axisLevel: Bool, beyond: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(String(format: "%.1f°", abs(deg)))
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .foregroundStyle(beyond ? Theme.needsBigRamp : (axisLevel ? Theme.levelGreen : Color(.label)))
+                .contentTransition(.numericText())
+            Text(detail).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private var rollDetail: String {
+        if advice.lateralBeyondRamp { return "way over — reposition" }
+        if abs(motion.rollDeg) < 0.1 { return "level" }
+        return motion.rollDeg > 0 ? "left side high" : "right side high"
+    }
+
+    private var pitchDetail: String {
+        if advice.longBeyondRamp { return "way over — reposition" }
+        if abs(motion.pitchDeg) < 0.1 { return "level" }
+        return motion.pitchDeg > 0 ? "nose high" : "nose low"
+    }
+
+    @ViewBuilder private var estimatedBadge: some View {
+        if config.usingTypicalDims {
+            Text("ESTIMATED")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 6))
+                .padding(14)
+        }
+    }
+
+    // MARK: - Wheel colouring / badges
+
+    private var maxCornerHeight: Double { max(corners.fl, corners.fr, corners.rl, corners.rr) }
+
+    private func cornerHeight(_ end: End, _ side: Side) -> Double {
+        switch (end, side) {
+        case (.front, .left): return corners.fl
+        case (.front, .right): return corners.fr
+        case (.rear, .left): return corners.rl
+        case (.rear, .right): return corners.rr
+        }
+    }
+
+    private func wheelColor(_ end: End, _ side: Side) -> Color {
+        if advice.isLevel { return Theme.levelGreen }
+        let raise = maxCornerHeight - cornerHeight(end, side)
+        if raise < 3 { return Color(.systemGray3) }   // a high corner — it stays on the ground
+        return advice.beyondRamp ? Theme.needsBigRamp : Theme.needsRamp
+    }
+
+    /// The recommended ramp step for a wheel, if it's one the advice actually ramps (nil when
+    /// beyond range, so no misleading figure is stamped on a van that needs repositioning).
+    private func stepBadge(_ end: End, _ side: Side) -> Int? {
+        var candidates: [Int] = []
+        if let w = advice.wheel, w.end == end, w.side == side { candidates.append(w.stepMM) }
+        if let ls = advice.longStepMM, advice.lowEnd == end { candidates.append(ls) }
+        return candidates.max()
+    }
+
+    // MARK: - Step instructions (per axis, honest about un-rampable tilts)
+
+    private enum StepState { case level, ramp(String, Color), beyond }
+
+    private var lateralState: StepState {
+        if advice.lateralBeyondRamp { return .beyond }
+        if let w = advice.wheel {
+            return .ramp("\(w.wheelName) · \(w.stepMM)mm ramp, start ~\(w.placementCM)cm out", severity(w.stepMM))
+        }
+        return .level
+    }
+
+    private var longState: StepState {
+        if advice.longBeyondRamp { return .beyond }
+        if let s = advice.longStepMM, let p = advice.longPlacementCM, let e = advice.lowEnd {
+            return .ramp("\(e == .front ? "Front" : "Rear") wheels · \(s)mm ramp, start ~\(p)cm out", severity(s))
+        }
+        return .level
+    }
+
+    private func severity(_ step: Int) -> Color {
+        guard let idx = config.activeStepsMM.firstIndex(of: step) else { return Theme.needsRamp }
+        return idx >= config.activeStepsMM.count - 1 ? Theme.needsBigRamp : Theme.needsRamp
+    }
+
+    private var stepsCard: some View {
+        VStack(spacing: 0) {
+            stepLine(title: "Side-to-side", state: lateralState)
+            Divider().padding(.leading, 48)
+            stepLine(title: "Front-to-back", state: longState)
+        }
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func stepLine(title: String, state: StepState) -> some View {
+        let (icon, iconColor, detail, detailColor): (String, Color, String, Color) = {
+            switch state {
+            case .level:
+                return ("checkmark.circle.fill", Theme.levelGreen, "level", Theme.levelGreen)
+            case .beyond:
+                return ("exclamationmark.triangle.fill", Theme.needsBigRamp,
+                        "too steep for a ramp — reposition", Theme.needsBigRamp)
+            case .ramp(let text, let c):
+                return ("arrow.up.forward.circle.fill", c, text, Color(.secondaryLabel))
+            }
+        }()
+        return HStack(spacing: 12) {
+            Image(systemName: icon).font(.title3).foregroundStyle(iconColor).frame(width: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.subheadline.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(detailColor)
+            }
+            Spacer(minLength: 0)
+        }
         .padding(14)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
     }
+
+    // MARK: - Details (Pro: tolerance + exact per-corner offsets)
 
     private var detailsSection: some View {
         VStack(spacing: 0) {
@@ -244,6 +362,7 @@ struct LevelScanView: View {
             Button("Level") { motion.simulate(rollDeg: 0.1, pitchDeg: 0.05) }
             Button("Right low 2.9°") { motion.simulate(rollDeg: 2.86, pitchDeg: 0) }
             Button("Left low + nose down") { motion.simulate(rollDeg: -2.2, pitchDeg: -1.2) }
+            Button("Way off (40° nose-up)") { motion.simulate(rollDeg: 0.2, pitchDeg: 40) }
         }
     }
     #endif

@@ -48,7 +48,14 @@ public struct Advice: Equatable, Sendable {
     public let lowEnd: End?
     public let longStepMM: Int?
     public let longPlacementCM: Int?
-    public var isLevel: Bool { wheel == nil && longStepMM == nil }
+    /// The tilt is so severe on this axis that no ramp in the set can bring it level — the
+    /// honest "reposition the van" case, NOT a silent clamp to the biggest step (the bug the
+    /// old code had: a 40° reading snapped to the max step and pretended it solved it).
+    /// When a side is beyond range its normal instruction is suppressed (wheel / longStep nil).
+    public let lateralBeyondRamp: Bool
+    public let longBeyondRamp: Bool
+    public var beyondRamp: Bool { lateralBeyondRamp || longBeyondRamp }
+    public var isLevel: Bool { wheel == nil && longStepMM == nil && !beyondRamp }
 }
 
 public enum RampAdvisor {
@@ -69,6 +76,15 @@ public enum RampAdvisor {
         return stepsMM.min(by: { abs(deficitMM - Double($0)) < abs(deficitMM - Double($1)) })
     }
 
+    /// True when the deficit runs so far past the biggest available step that snapping to it
+    /// would leave the vehicle badly out — i.e. no ramp can fix this and the honest answer is
+    /// "reposition." The 1.5× margin means the largest step must land you within half a step
+    /// of level to still count as rampable.
+    public static func exceedsRampRange(deficitMM: Double, stepsMM: [Int]) -> Bool {
+        guard let largest = stepsMM.max() else { return false }
+        return deficitMM > Double(largest) * 1.5
+    }
+
     /// Full recommendation from one attitude reading + the vehicle's known dimensions.
     /// `stepsMM` must be ascending. Track here is the RELEVANT track — the caller passes the
     /// rear track for AL-KO-style chassis where rear differs from front (the difference is
@@ -77,18 +93,24 @@ public enum RampAdvisor {
                               trackMM: Double, wheelbaseMM: Double,
                               stepsMM: [Int], tolerance: Tolerance) -> Advice {
         let lateral = LevelMath.lateralDeficitMM(rollDeg: rollDeg, trackMM: trackMM)
+        let longitudinal = LevelMath.longitudinalDeficitMM(pitchDeg: pitchDeg, wheelbaseMM: wheelbaseMM)
         let lowSide: Side = rollDeg > 0 ? .right : .left      // roll>0 = left high
         let lowEnd: End = pitchDeg > 0 ? .rear : .front       // pitch>0 = front high
 
+        // Beyond range = un-rampable. Suppress the normal instruction so the UI shows the
+        // honest "reposition" state instead of a max-step figure that doesn't actually level it.
+        let lateralBeyond = abs(rollDeg) > 0.001 && exceedsRampRange(deficitMM: lateral, stepsMM: stepsMM)
+        let longBeyond = abs(pitchDeg) > 0.001 && exceedsRampRange(deficitMM: longitudinal, stepsMM: stepsMM)
+
         var wheel: RampInstruction?
-        if abs(rollDeg) > 0.001, let step = nearestStep(deficitMM: lateral, stepsMM: stepsMM, tolerance: tolerance) {
+        if !lateralBeyond, abs(rollDeg) > 0.001,
+           let step = nearestStep(deficitMM: lateral, stepsMM: stepsMM, tolerance: tolerance) {
             wheel = RampInstruction(end: lowEnd, side: lowSide, stepMM: step,
                                     placementCM: placementCM(forStepMM: step))
         }
 
-        let longitudinal = LevelMath.longitudinalDeficitMM(pitchDeg: pitchDeg, wheelbaseMM: wheelbaseMM)
         var longStep: Int?
-        if abs(pitchDeg) > 0.001 {
+        if !longBeyond, abs(pitchDeg) > 0.001 {
             longStep = nearestStep(deficitMM: longitudinal, stepsMM: stepsMM, tolerance: tolerance)
         }
 
@@ -96,7 +118,9 @@ public enum RampAdvisor {
             wheel: wheel,
             lowEnd: longStep != nil ? lowEnd : nil,
             longStepMM: longStep,
-            longPlacementCM: longStep.map(placementCM(forStepMM:))
+            longPlacementCM: longStep.map(placementCM(forStepMM:)),
+            lateralBeyondRamp: lateralBeyond,
+            longBeyondRamp: longBeyond
         )
     }
 }

@@ -43,6 +43,7 @@ workflows:
         # Runs AFTER `xcodegen generate` so use-profiles can bind onto the generated project.
         script: |
           keychain initialize
+          # CERTIFICATE_PRIVATE_KEY is a secure Codemagic env var holding the PEM signing key.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \

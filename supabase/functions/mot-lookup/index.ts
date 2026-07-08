@@ -54,12 +54,31 @@ Deno.serve(async (req) => {
     if (!res.ok) throw new Error(`MOT API ${res.status}`);
     const v = await res.json();
     const record = Array.isArray(v) ? v[0] : v;
+    const tests = Array.isArray(record.motTests) ? record.motTests : [];
+    const latest = tests[0]; // DVSA returns most-recent test first
     return new Response(JSON.stringify({
       found: true,
-      make: record.make ?? null,
-      model: record.model ?? null,
-      manufactureYear: record.manufactureYear ? Number(record.manufactureYear) : null,
+      // --- identity / spec: powers the Setup confirmation ("your White Adria on a Fiat Ducato") ---
+      make: record.make ?? null,               // base chassis make for conversions (e.g. FIAT)
+      model: record.model ?? null,              // model / converter brand (e.g. ADRIA)
       fuelType: record.fuelType ?? null,
+      primaryColour: record.primaryColour ?? null,
+      engineSize: record.engineSize ?? null,
+      manufactureYear: record.manufactureYear ? Number(record.manufactureYear) : null,
+      manufactureDate: record.manufactureDate ?? null,
+      registrationDate: record.registrationDate ?? null,   // reliable year even when manufactureYear is null
+      firstUsedDate: record.firstUsedDate ?? null,
+      hasOutstandingRecall: record.hasOutstandingRecall ?? null,
+      // --- MOT data: a Pro/premium surface, NOT used by the free levelling flow ---
+      mot: latest ? {
+        result: latest.testResult ?? null,
+        expiryDate: latest.expiryDate ?? null,
+        lastTestDate: latest.completedDate ?? null,
+        mileage: latest.odometerValue ?? null,
+        mileageUnit: latest.odometerUnit ?? null,
+        testCount: tests.length,
+      } : null,
+      motHistory: tests, // full test history (mileage/defects per test) — gate behind Pro in the client
     }), { headers });
   } catch (e) {
     // The Setup screen already carries "this lookup is occasionally unavailable" copy —

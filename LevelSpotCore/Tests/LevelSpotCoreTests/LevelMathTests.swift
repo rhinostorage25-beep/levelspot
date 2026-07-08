@@ -85,4 +85,28 @@ final class LevelMathTests: XCTestCase {
         XCTAssertEqual(standard.wheel?.stepMM, 44)
         XCTAssertEqual(alko.wheel?.stepMM, 78)
     }
+
+    // V9: an extreme tilt is honest, not a silent clamp. 40° nose-up over wb 3450 needs ~2.9m
+    // of lift under the rear — no ramp does that. The old code snapped it to the 112mm step and
+    // showed "112mm · 26cm out" (the reported #6 bug). Now longStep is suppressed and flagged.
+    func testV9BeyondRampRangeLongitudinal() {
+        let advice = RampAdvisor.advise(rollDeg: 0, pitchDeg: 40, trackMM: 1790, wheelbaseMM: 3450,
+                                        stepsMM: defaultSteps, tolerance: .comfort)
+        XCTAssertTrue(advice.longBeyondRamp)
+        XCTAssertTrue(advice.beyondRamp)
+        XCTAssertNil(advice.longStepMM)      // NOT clamped to 112
+        XCTAssertNil(advice.longPlacementCM)
+        XCTAssertFalse(advice.isLevel)       // a 40° van is emphatically not level
+    }
+
+    // V10: the boundary holds — a big-but-rampable deficit still snaps to the top step. 150mm on
+    // track 1790 (roll ~4.79°) is under the 1.5×112 = 168mm ceiling, so it's a 112mm ramp, not
+    // "beyond range". Guards the threshold against creeping down onto legitimate steep pitches.
+    func testV10LargeButRampableStillSnaps() {
+        let roll = atan(150.0 / 1790.0) * 180 / .pi
+        let advice = RampAdvisor.advise(rollDeg: roll, pitchDeg: 0, trackMM: 1790, wheelbaseMM: 3450,
+                                        stepsMM: defaultSteps, tolerance: .comfort)
+        XCTAssertFalse(advice.lateralBeyondRamp)
+        XCTAssertEqual(advice.wheel?.stepMM, 112)
+    }
 }
