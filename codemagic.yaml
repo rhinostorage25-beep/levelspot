@@ -19,6 +19,8 @@ workflows:
     integrations:
       app_store_connect: LevelSpot ASC key   # <- must match the integration name in step 2
     environment:
+      groups:
+        - signing   # holds the secure CERTIFICATE_PRIVATE_KEY var (added in the Codemagic UI)
       xcode: latest
       vars:
         XCODE_SCHEME: "LevelSpot"
@@ -33,20 +35,17 @@ workflows:
       - name: Run LevelSpotCore contract tests
         # The 11 cross-platform vectors — a red test here should stop the release.
         script: swift test --package-path LevelSpotCore
-      - name: Create + fetch signing files, then bind them
-        # Fresh Apple account = NO distribution certificate and NO profile. `fetch-signing-files
-        # --create` mints both, but needs a certificate private key to do so (automatic
-        # ios_signing only *fetches*, which is why it failed with "no matching profiles").
-        # Generate a key so --create can mint the cert + App Store profile, then bind them
-        # onto the XcodeGen-generated project. Must run AFTER `xcodegen generate`.
-        # NOTE: this mints a fresh cert each run — fine for the first few builds; to avoid
-        # Apple's cert limit long-term, store this key as a secure CM env var and reuse it.
+      - name: Fetch (first run creates) signing files, then bind them
+        # Reuses ONE distribution certificate across builds. The persistent private key lives
+        # in the Codemagic secure env var CERTIFICATE_PRIVATE_KEY (never in the repo). The
+        # first build after that key is set mints one cert with it; every build after reuses
+        # the same cert — no more per-build minting (which hit Apple's cert limit).
+        # Runs AFTER `xcodegen generate` so use-profiles can bind onto the generated project.
         script: |
           keychain initialize
-          ssh-keygen -t rsa -b 2048 -m PEM -f /tmp/cert_key -q -N ""
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --certificate-key=@file:/tmp/cert_key \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
           keychain add-certificates
           xcode-project use-profiles
