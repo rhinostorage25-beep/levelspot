@@ -23,7 +23,7 @@ workflows:
       vars:
         XCODE_SCHEME: "LevelSpot"
         BUNDLE_ID: "uk.co.levelspot.app"
-        APP_STORE_APP_ID: 0000000000  # <- TODO: replace with the numeric app id from App Store Connect
+        APP_STORE_APP_ID: 6788755210  # LevelSpot, App Store Connect app id (created 2026-07-08)
     scripts:
       - name: Install XcodeGen & generate the project
         # Same generation step CI already does; the .xcodeproj is not committed.
