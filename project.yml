@@ -6,7 +6,12 @@ options:
   bundleIdPrefix: uk.co.levelspot
   deploymentTarget:
     iOS: "17.0"
-  xcodeVersion: "16.0"
+  # Matches the Xcode actually present on the GitHub Actions macos-14 runner (15.4) —
+  # pinning ahead of that (e.g. "16.0") makes XcodeGen emit a pbxproj format newer
+  # Xcode versions can't open ("future Xcode project file format"). Nothing in this
+  # codebase needs Xcode 16 specifically: SwiftData/@Observable/the new Map API are
+  # all iOS 17 SDK, which Xcode 15.x already ships.
+  xcodeVersion: "15.4"
 packages:
   LevelSpotCore:
     path: LevelSpotCore
