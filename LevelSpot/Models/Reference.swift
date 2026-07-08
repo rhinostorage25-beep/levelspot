@@ -80,19 +80,26 @@ final class ReferenceStore {
     func matchPreset(make: String, model: String?, year: Int?) -> SetupPreset? {
         let m = make.uppercased()
         let mod = (model ?? "").uppercased()
+        var makeMatches: [SetupPreset] = []
         for preset in data.setupPresets {
             guard let gen = generation(id: preset.genId) else { continue }
-            let makeMatches = gen.make.uppercased().contains(m) || m.contains(gen.make.uppercased())
+            let makeOK = gen.make.uppercased().contains(m) || m.contains(gen.make.uppercased())
                 || (gen.badges ?? "").uppercased().contains(m)
-            guard makeMatches else { continue }
+            guard makeOK else { continue }
+            makeMatches.append(preset)
+            // Strongest signal: the model name appears in the DVSA model string.
             if !mod.isEmpty {
                 let modelWords = gen.model.uppercased().split(separator: " ")
                 if modelWords.contains(where: { mod.contains($0) }) { return preset }
             }
+            // Next: the registration year sits inside this generation's production run.
             if let y = year, let from = gen.yearFrom {
                 if y >= from && (gen.yearTo == nil || y <= gen.yearTo!) { return preset }
             }
         }
-        return nil
+        // Fallback: the make matched exactly one vehicle in our list (e.g. Fiat -> Ducato),
+        // so it's unambiguous even when the DVSA model/year didn't line up. Pre-selecting the
+        // obvious vehicle beats leaving the lookup feeling like a dead end.
+        return makeMatches.count == 1 ? makeMatches.first : nil
     }
 }

@@ -43,7 +43,7 @@ struct ArrivalView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { showSetup = true } label: {
-                    Image(systemName: "car.side").accessibilityLabel("Vehicle settings")
+                    Image(systemName: "gearshape").accessibilityLabel("Settings")
                 }
             }
             #if DEBUG
