@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import MapKit
+import LevelSpotCore
 
 struct ArrivalView: View {
     let config: VehicleConfig
@@ -12,6 +13,7 @@ struct ArrivalView: View {
 
     @State private var showSetup = false
     @State private var showPaywall = false
+    @State private var sunPref: SunPreference = .sun
 
     /// Match against the user's OWN history only, within a tight radius — falls back to a
     /// live scan when nothing is found. Local haversine so this works with zero signal.
@@ -34,6 +36,9 @@ struct ArrivalView: View {
                     matchedContent(match.pitch, distanceM: match.distanceM)
                 } else {
                     newPitchCard
+                }
+                if location.latitude != nil {
+                    sunPlannerCard
                 }
             }
             .padding()
@@ -66,6 +71,78 @@ struct ArrivalView: View {
         .navigationDestination(isPresented: $showSetup) { VehicleSetupView() }
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
         .onAppear { location.requestAndStart() }
+    }
+
+    // MARK: - Sun & shade planner
+
+    /// The sundowner window — today at 18:30 local. A time picker is a later refinement; evening
+    /// is when the awning question actually matters.
+    private var eveningDate: Date {
+        Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: Date()) ?? Date()
+    }
+
+    private var eveningSun: SunPosition? {
+        guard let lat = location.latitude, let lon = location.longitude else { return nil }
+        return SolarPosition.at(latitude: lat, longitude: lon, date: eveningDate)
+    }
+
+    /// Turn a compass bearing into a plain-English direction ("north-west" etc.).
+    private func cardinal(_ deg: Double) -> String {
+        let dirs = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"]
+        return dirs[Int((deg / 45).rounded()) % 8]
+    }
+
+    @ViewBuilder private var sunPlannerCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Sun & shade", systemImage: "sun.max.fill")
+                    .font(.headline).foregroundStyle(Theme.sun)
+                Spacer()
+                if !entitlements.isPro { proPill }
+            }
+
+            if entitlements.isPro {
+                Picker("", selection: $sunPref) {
+                    Text("Chase sun").tag(SunPreference.sun)
+                    Text("Find shade").tag(SunPreference.shade)
+                }
+                .pickerStyle(.segmented)
+
+                if let sun = eveningSun, sun.isUp {
+                    let heading = SolarPosition.vanHeadingForAwning(
+                        sunAzimuthDeg: sun.azimuthDeg,
+                        awningOffsetDeg: config.livingSide.awningOffsetDeg,
+                        preference: sunPref)
+                    Text("This evening the sun's to the \(cardinal(sun.azimuthDeg)) (about \(Int(sun.azimuthDeg))°, \(sun.elevationDeg < 15 ? "low" : "high") in the sky).")
+                        .font(.subheadline)
+                    Text("Point the van about \(Int(heading))° — \(cardinal(heading)) — to put your \(config.livingSide.label.lowercased())-side awning in the \(sunPref == .sun ? "sun" : "shade").")
+                        .font(.subheadline).fontWeight(.medium)
+                    Text("The ground still has to be level — run a scan to see the ramp trade-off for that heading.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                } else {
+                    Text("The sun's already below the horizon this evening here — nothing to plan for tonight.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Plan the pitch around the evening sun — LevelSpot works out which way to point the van so your awning lands in sun or shade.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .contentShape(Rectangle())
+        .onTapGesture { if !entitlements.isPro { showPaywall = true } }
+    }
+
+    private var proPill: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "lock").font(.caption2)
+            Text("Pro").font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Matched pitch

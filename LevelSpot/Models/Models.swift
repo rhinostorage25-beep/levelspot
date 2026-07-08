@@ -15,6 +15,18 @@ enum LivingSide: String, Codable, CaseIterable {
         case .passenger: return "Passenger"
         }
     }
+
+    /// The awning/living side as a bearing offset from the van's nose — front 0, rear 180,
+    /// right +90, left −90 — used by the sun/shade planner. Driver/passenger assume UK
+    /// right-hand drive (driver = right side); a market flip is a later refinement.
+    var awningOffsetDeg: Double {
+        switch self {
+        case .front: return 0
+        case .rear: return 180
+        case .driver: return 90      // RHD: driver's side is the right
+        case .passenger: return -90  // left / kerb side
+        }
+    }
 }
 
 /// Answer to the Setup chassis question. `.measured` is the resolved form of "Not sure" —
