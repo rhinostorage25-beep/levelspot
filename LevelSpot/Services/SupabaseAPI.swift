@@ -1,11 +1,13 @@
 import Foundation
 
-/// Fill these in once the Supabase project exists (supabase/README steps). The app is fully
-/// functional with them empty — the reg lookup shows its "occasionally unavailable" state
-/// and history stays local-only until sync ships.
+/// The "levelspot" Supabase project. `anonKey` is Supabase's newer publishable-key format
+/// (sb_publishable_...) - functionally the same public/client-safe role as the older anon
+/// JWT key it replaces: safe to ship in the compiled app, protected by RLS
+/// (supabase/migrations/001_schema.sql), not by secrecy. The service_role key and DVSA
+/// credentials are NOT here and never should be - those live only in Edge Function secrets.
 enum SupabaseConfig {
-    static let url = ""      // e.g. https://abcdefgh.supabase.co
-    static let anonKey = ""  // the public anon key (NOT the service role key)
+    static let url = "https://bhgfqdqywteqzyyndkbq.supabase.co"
+    static let anonKey = "sb_publishable_QN1QCfbXWg7CffKF9p0PGQ_jp6RZ8O1"
     static var isConfigured: Bool { !url.isEmpty && !anonKey.isEmpty }
 }
 
