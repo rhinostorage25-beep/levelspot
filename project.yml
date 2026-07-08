@@ -40,6 +40,12 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Manual signing for Codemagic: fetch-signing-files creates the profile, and
+        # `xcode-project use-profiles` injects the PROVISIONING_PROFILE_SPECIFIER — but it
+        # needs the team + manual style present in the generated project to bind it, otherwise
+        # archive fails with "requires a provisioning profile". (Team = Jonathan Davis, B58BTCVS53.)
+        DEVELOPMENT_TEAM: B58BTCVS53
+        CODE_SIGN_STYLE: Manual
 schemes:
   LevelSpot:
     build:
