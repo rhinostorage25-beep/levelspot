@@ -13,6 +13,8 @@ struct LevelScanView: View {
     @State private var showSaveSheet = false
     @State private var wasLevel = false
     @State private var lastStep: Int?
+    @State private var soundOn = true
+    @State private var audio = AudioCoach()
 
     var body: some View {
         ScrollView {
@@ -21,7 +23,14 @@ struct LevelScanView: View {
                 vanCard
                 stepsCard
                 detailsSection
-                Text("Audio and haptic cues guide you as you adjust — no need to keep checking the screen.")
+                Toggle(isOn: $soundOn) {
+                    Label(soundOn ? "Audio level guide on" : "Audio level guide off",
+                          systemImage: soundOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                        .font(.subheadline)
+                }
+                .tint(Theme.levelGreen)
+                .padding(.horizontal, 4)
+                Text("Beeps speed up as you near level and chime when you're there — no need to keep checking the screen.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
@@ -47,11 +56,21 @@ struct LevelScanView: View {
         .sheet(isPresented: $showSaveSheet) {
             SavePitchSheet(config: config, corners: corners, isLevel: advice.isLevel)
         }
-        .onAppear { motion.start() }
-        .onDisappear { motion.stop() }
+        .onAppear {
+            motion.start()
+            audio.start()
+            pushAudioState()
+        }
+        .onDisappear {
+            motion.stop()
+            audio.stop()
+        }
+        .onChange(of: offLevelMM) { _, _ in pushAudioState() }
+        .onChange(of: soundOn) { _, _ in pushAudioState() }
         .onChange(of: advice.isLevel) { _, nowLevel in
             if nowLevel && !wasLevel { Haptics.levelReached() }
             wasLevel = nowLevel
+            pushAudioState()
         }
         .onChange(of: advice.wheel?.stepMM) { _, step in
             if step != lastStep && step != nil { Haptics.stepChanged() }
@@ -82,6 +101,24 @@ struct LevelScanView: View {
         LevelMath.cornerHeights(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
                                 trackMM: Double(config.trackRearMM),
                                 wheelbaseMM: Double(config.wheelbaseMM))
+    }
+
+    /// How un-level the van is, as the full corner-height spread (mm) — the single scalar the
+    /// audio coach maps to beep cadence.
+    private var offLevelMM: Double {
+        let c = [corners.fl, corners.fr, corners.rl, corners.rr]
+        return (c.max() ?? 0) - (c.min() ?? 0)
+    }
+
+    /// The "level enough" band in mm — same definition `nearestStep` uses, so the audio chime
+    /// fires exactly when the screen says level.
+    private var toleranceMM: Double {
+        Double(config.activeStepsMM.first ?? 44) / 2 * effectiveTolerance.multiplier
+    }
+
+    private func pushAudioState() {
+        audio.update(offMM: offLevelMM, toleranceMM: toleranceMM,
+                     isLevel: advice.isLevel, beyond: advice.beyondRamp, enabled: soundOn)
     }
 
     // MARK: - Verdict banner (reflects BOTH axes — never green while one side is out)

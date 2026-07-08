@@ -20,7 +20,13 @@ final class EntitlementStore {
     /// App Store Connect (and any local .storekit config used for simulator testing).
     static let proProductID = "uk.co.levelspot.pro"
 
-    private(set) var isPro = false
+    /// ⚠️ TEMPORARY — TESTFLIGHT TESTING ONLY. Forces every Pro surface on so beta testers can
+    /// exercise them before the `uk.co.levelspot.pro` product + Paid Applications Agreement exist
+    /// (a real purchase literally can't transact yet). Applies in Release too, unlike the DEBUG
+    /// toggle below. **MUST be set back to `false` before the App Store submission.**
+    static let forceProForTesting = true
+
+    private(set) var isPro = forceProForTesting
     private(set) var proProduct: Product?
     private(set) var purchaseInFlight = false
     private(set) var lastError: String?
@@ -62,7 +68,7 @@ final class EntitlementStore {
                 entitled = true
             }
         }
-        isPro = entitled
+        isPro = entitled || Self.forceProForTesting   // remove the OR with forceProForTesting at release
     }
 
     /// Kick off the purchase. Safe to call before the product exists in App Store Connect —

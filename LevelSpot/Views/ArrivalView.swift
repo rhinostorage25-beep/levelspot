@@ -84,7 +84,7 @@ struct ArrivalView: View {
 
         VStack(spacing: 0) {
             headingRow(color: Theme.levelGreen, title: "Level position",
-                       detail: pitch.levelHeading.map { "Heading \($0)° · matches this pitch" } ?? "Corner data saved",
+                       detail: pitch.levelHeading.map { "You faced \($0)° here — line up the same way, then scan" } ?? "Run a live scan for the exact ramps",
                        locked: false)
             Divider().padding(.leading, 52)
             headingRow(color: Theme.sun, title: "Best sun",
@@ -98,6 +98,10 @@ struct ArrivalView: View {
                        capture: canLog(pitch.viewHeading) ? { logHeading(pitch, \.viewHeading) } : nil)
         }
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+
+        Text("Sun & view stay reliable here. Ground slope shifts metre to metre — run a live scan for the exact ramps where you actually stop.")
+            .font(.caption).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
         if entitlements.isPro, conflictExists(pitch) {
             infoBanner("exclamationmark.triangle", "Sun and view face a different way to level — from your own past visits here.")
