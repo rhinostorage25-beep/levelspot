@@ -179,14 +179,41 @@ struct PaywallSheet: View {
             }
 
             Button {
-                // v1 placeholder — becomes a StoreKit 2 purchase with server verification.
-                entitlements.purchasePro()
-                dismiss()
+                Task {
+                    await entitlements.purchasePro()
+                    if entitlements.isPro { dismiss() }
+                }
             } label: {
-                Text("Unlock LevelSpot Pro").font(.headline).frame(maxWidth: .infinity)
+                Group {
+                    if entitlements.purchaseInFlight {
+                        ProgressView()
+                    } else {
+                        // Show the real localised price once StoreKit has loaded the product.
+                        Text(entitlements.proPriceText.map { "Unlock Pro · \($0)" } ?? "Unlock LevelSpot Pro")
+                            .font(.headline)
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            .disabled(entitlements.purchaseInFlight)
+
+            Button("Restore purchases") {
+                Task {
+                    await entitlements.restore()
+                    if entitlements.isPro { dismiss() }
+                }
+            }
+            .font(.footnote)
+            .disabled(entitlements.purchaseInFlight)
+
+            if let error = entitlements.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
             Spacer(minLength: 0)
         }
         .padding(24)
