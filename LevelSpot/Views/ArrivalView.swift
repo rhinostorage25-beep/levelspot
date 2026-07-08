@@ -92,6 +92,55 @@ struct ArrivalView: View {
         return dirs[Int((deg / 45).rounded()) % 8]
     }
 
+    /// Where the target heading sits relative to where the phone's top (= the van's nose) is
+    /// currently pointing, in −180…180°. Positive = target is clockwise (turn right). nil when
+    /// the compass has no fix yet.
+    private func relativeBearing(target: Int) -> Double? {
+        guard let cur = location.headingDeg else { return nil }
+        var d = Double(target - cur).truncatingRemainder(dividingBy: 360)
+        if d > 180 { d -= 360 }
+        if d < -180 { d += 360 }
+        return d
+    }
+
+    /// A live compass: an arrow that rotates as you turn, so you spin the van until it points to
+    /// the nose marker at the top. Turns an abstract "200°" into something you can actually aim.
+    @ViewBuilder private func compassGuide(target: Int) -> some View {
+        let rel = relativeBearing(target: target)
+        let aligned = (rel.map { abs($0) < 8 }) ?? false
+        VStack(spacing: 8) {
+            ZStack {
+                Circle().strokeBorder(Color(.separator), lineWidth: 2).frame(width: 96, height: 96)
+                Image(systemName: "triangle.fill")     // the nose (front of the van) sits at the top
+                    .font(.system(size: 9)).foregroundStyle(.secondary).offset(y: -54)
+                if let rel {
+                    Image(systemName: "location.north.fill")
+                        .font(.system(size: 38))
+                        .foregroundStyle(aligned ? Theme.levelGreen : Theme.sun)
+                        .rotationEffect(.degrees(rel))
+                        .animation(.snappy, value: rel)
+                } else {
+                    Image(systemName: "safari").font(.system(size: 32)).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            if let rel {
+                if aligned {
+                    Text("Lined up — the nose is facing the right way.")
+                        .font(.caption).foregroundStyle(Theme.levelGreen)
+                } else {
+                    Text("Turn \(rel > 0 ? "right" : "left") about \(abs(Int(rel.rounded())))° — rotate until the arrow points to the nose.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Hold the phone flat with its top toward the front of the van to use the live compass.")
+                    .font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     @ViewBuilder private var sunPlannerCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -109,14 +158,15 @@ struct ArrivalView: View {
                 .pickerStyle(.segmented)
 
                 if let sun = eveningSun, sun.isUp {
-                    let heading = SolarPosition.vanHeadingForAwning(
+                    let heading = Int(SolarPosition.vanHeadingForAwning(
                         sunAzimuthDeg: sun.azimuthDeg,
                         awningOffsetDeg: config.livingSide.awningOffsetDeg,
-                        preference: sunPref)
+                        preference: sunPref).rounded())
                     Text("This evening the sun's to the \(cardinal(sun.azimuthDeg)) (about \(Int(sun.azimuthDeg))°, \(sun.elevationDeg < 15 ? "low" : "high") in the sky).")
                         .font(.subheadline)
-                    Text("Point the van about \(Int(heading))° — \(cardinal(heading)) — to put your \(config.livingSide.label.lowercased())-side awning in the \(sunPref == .sun ? "sun" : "shade").")
+                    Text("Point the van about \(heading)° — \(cardinal(Double(heading))) — to put your \(config.livingSide.label.lowercased())-side awning in the \(sunPref == .sun ? "sun" : "shade").")
                         .font(.subheadline).fontWeight(.medium)
+                    compassGuide(target: heading)
                     Text("The ground still has to be level — run a scan to see the ramp trade-off for that heading.")
                         .font(.caption).foregroundStyle(.tertiary)
                 } else {
