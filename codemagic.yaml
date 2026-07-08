@@ -19,6 +19,13 @@ workflows:
     integrations:
       app_store_connect: LevelSpot ASC key   # <- must match the integration name in step 2
     environment:
+      # Automatic code signing: Codemagic uses the `LevelSpot ASC key` integration to
+      # CREATE and manage the distribution certificate (incl. its private key) AND the
+      # provisioning profile — no manual cert handling. This replaces the old manual
+      # fetch-signing-files step, which failed on a fresh account with no cert/private key.
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: uk.co.levelspot.app
       xcode: latest
       vars:
         XCODE_SCHEME: "LevelSpot"
@@ -33,12 +40,11 @@ workflows:
       - name: Run LevelSpotCore contract tests
         # The 11 cross-platform vectors — a red test here should stop the release.
         script: swift test --package-path LevelSpotCore
-      - name: Fetch signing files (automatic, via the ASC API key)
-        script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
-          keychain add-certificates
-          xcode-project use-profiles
+      - name: Bind the auto-managed signing to the generated project
+        # `ios_signing` (above) already created/fetched the cert + profile before scripts
+        # ran; this binds them onto the freshly XcodeGen-generated .xcodeproj so the
+        # archive can sign. Must run AFTER `xcodegen generate`.
+        script: xcode-project use-profiles
       - name: Set the TestFlight build number
         script: |
           BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APP_ID" || echo 0)
