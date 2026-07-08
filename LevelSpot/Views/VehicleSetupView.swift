@@ -41,13 +41,18 @@ struct VehicleSetupView: View {
                 Text("This lookup service is occasionally unavailable — you can always choose your vehicle from the list below instead.")
             }
 
-            Section("Choose your vehicle") {
+            Section {
                 ForEach(ref.setupPresets) { preset in
                     presetRow(preset)
                 }
                 manualRow
                 if isManual { manualFields }
                 if let wb = selectedWheelbases, wb.count > 1 { wheelbasePicker(wb) }
+            } header: {
+                // Not the Section("title") { } shorthand: that overload doesn't support a
+                // trailing footer closure too, and mixing them confuses the compiler's
+                // overload resolution instead of just erroring on the missing combination.
+                Text("Choose your vehicle")
             } footer: {
                 if usingTypicalDims, let name = selectedPresetName {
                     Text("Using typical dimensions for \(name) — readings will be labelled **Estimated**. Choose \"Enter manually\" and measure your own for an exact fit.")
