@@ -7,9 +7,17 @@ on:
   workflow_dispatch:
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # XcodeGen's pbxproj output format isn't controlled by project.yml's `xcodeVersion`
+      # option the way an earlier fix here assumed - it's whatever objectVersion the
+      # installed XcodeGen release defaults to. So the real fix is the other direction:
+      # make sure CI's Xcode is new enough to open it, rather than fighting the generator.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
@@ -17,7 +25,11 @@ jobs:
       - name: Core tests (the cross-platform contract vectors)
         run: swift test --package-path LevelSpotCore
       - name: Build app (no signing)
+        # Generic simulator destination, not a named device: with xcode-version pinned to
+        # "latest-stable" rather than an exact version, the pre-provisioned simulator list
+        # can shift between Xcode releases. We're only compiling here (LevelSpotCore's
+        # actual test run already happened above) so no booted device is needed.
         run: >
           xcodebuild -project LevelSpot.xcodeproj -scheme LevelSpot
-          -destination 'platform=iOS Simulator,name=iPhone 15'
+          -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO build
