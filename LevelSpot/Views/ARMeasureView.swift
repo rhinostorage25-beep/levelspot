@@ -43,10 +43,17 @@ struct ARMeasureView: View {
     }
 
     private var reticle: some View {
-        Image(systemName: "plus")
-            .font(.system(size: 36, weight: .thin))
-            .foregroundStyle(model.hasHit ? Color.green : Color.white)
-            .shadow(radius: 3)
+        let color: Color = model.hasHit ? Color.green : Color.white
+        return ZStack {
+            Circle().stroke(color.opacity(0.42), lineWidth: 1).frame(width: 132, height: 132)
+            Circle().stroke(color.opacity(0.75), lineWidth: 1.5).frame(width: 92, height: 92)
+            ScopeReticle().stroke(color, lineWidth: 1.6).frame(width: 140, height: 140)
+            Circle().stroke(color, lineWidth: 1.6).frame(width: 14, height: 14)
+            Circle().fill(color).frame(width: 4, height: 4)
+        }
+        // A soft shadow keeps the reticle legible over any camera background.
+        .shadow(color: .black.opacity(0.7), radius: 2)
+        .animation(.easeOut(duration: 0.15), value: model.hasHit)
     }
 
     private var controls: some View {

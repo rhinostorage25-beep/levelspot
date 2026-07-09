@@ -401,37 +401,3 @@ struct ArrivalView: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 }
-
-// MARK: - Spy-scope compass shapes
-
-/// The fixed targeting crosshair: four capped arms on the N/E/S/W axes, drawn around the centre.
-private struct ScopeReticle: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let c = CGPoint(x: rect.midX, y: rect.midY)
-        let inner: CGFloat = 16, outer: CGFloat = 48, cap: CGFloat = 5
-        for deg in stride(from: 0.0, through: 270.0, by: 90.0) {
-            let a = deg * .pi / 180
-            let dx = CGFloat(cos(a)), dy = CGFloat(sin(a))
-            let p1 = CGPoint(x: c.x + dx * inner, y: c.y + dy * inner)
-            let p2 = CGPoint(x: c.x + dx * outer, y: c.y + dy * outer)
-            p.move(to: p1); p.addLine(to: p2)
-            let px = -dy, py = dx                       // perpendicular, for the end cap
-            p.move(to: CGPoint(x: p2.x + px * cap, y: p2.y + py * cap))
-            p.addLine(to: CGPoint(x: p2.x - px * cap, y: p2.y - py * cap))
-        }
-        return p
-    }
-}
-
-/// An upward-pointing triangle — the nose marker and the needle's arrowhead.
-private struct ScopeTriangle: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        p.closeSubpath()
-        return p
-    }
-}
