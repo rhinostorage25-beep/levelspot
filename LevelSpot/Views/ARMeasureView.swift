@@ -1,6 +1,7 @@
 import SwiftUI
 import RealityKit
 import ARKit
+import AVFoundation
 
 /// Which dimension we're measuring — only changes the on-screen coaching, the maths is identical.
 enum MeasureKind {
@@ -161,7 +162,11 @@ final class ARMeasureModel: NSObject, ObservableObject, ARSessionDelegate {
         p1 = nil; liveMM = nil; resultMM = nil; phase = .first
     }
 
-    func pause() { arView?.session.pause() }
+    func pause() {
+        arView?.session.pause()
+        // Release the audio session the camera grabbed, so the level-scan beeps can re-claim it.
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
 
     /// World-space point under the centre reticle, via an estimated-plane raycast (works even
     /// before a full plane is detected, from feature points).
