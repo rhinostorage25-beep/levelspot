@@ -42,7 +42,11 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
-        if newHeading.trueHeading >= 0 { headingDeg = Int(newHeading.trueHeading.rounded()) }
+        // Prefer true north, but fall back to magnetic — trueHeading is -1 until iOS has a
+        // location fix and a calibrated compass, and without the fallback the heading (and the
+        // sun-planner compass) would sit at nil forever. Magnetic is within ~1° in the UK.
+        let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        if heading >= 0 { headingDeg = Int(heading.rounded()) }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

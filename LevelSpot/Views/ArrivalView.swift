@@ -93,11 +93,9 @@ struct ArrivalView: View {
     }
 
     /// Where the target heading sits relative to where the phone's top (= the van's nose) is
-    /// currently pointing, in −180…180°. Positive = target is clockwise (turn right). nil when
-    /// the compass has no fix yet.
-    private func relativeBearing(target: Int) -> Double? {
-        guard let cur = location.headingDeg else { return nil }
-        var d = Double(target - cur).truncatingRemainder(dividingBy: 360)
+    /// currently pointing, in −180…180°. Positive = target is clockwise (turn right).
+    private func relativeBearing(target: Int, current: Int) -> Double {
+        var d = Double(target - current).truncatingRemainder(dividingBy: 360)
         if d > 180 { d -= 360 }
         if d < -180 { d += 360 }
         return d
@@ -105,8 +103,10 @@ struct ArrivalView: View {
 
     /// A live compass: an arrow that rotates as you turn, so you spin the van until it points to
     /// the nose marker at the top. Turns an abstract "200°" into something you can actually aim.
-    @ViewBuilder private func compassGuide(target: Int) -> some View {
-        let rel = relativeBearing(target: target)
+    /// `current` is read from the view body (not deep inside a helper) so SwiftUI re-renders the
+    /// arrow on every heading update.
+    @ViewBuilder private func compassGuide(target: Int, current: Int?) -> some View {
+        let rel = current.map { relativeBearing(target: target, current: $0) }
         let aligned = (rel.map { abs($0) < 8 }) ?? false
         VStack(spacing: 8) {
             ZStack {
@@ -166,7 +166,7 @@ struct ArrivalView: View {
                         .font(.subheadline)
                     Text("Point the van about \(heading)° — \(cardinal(Double(heading))) — to put your \(config.livingSide.label.lowercased())-side awning in the \(sunPref == .sun ? "sun" : "shade").")
                         .font(.subheadline).fontWeight(.medium)
-                    compassGuide(target: heading)
+                    compassGuide(target: heading, current: location.headingDeg)
                     Text("The ground still has to be level — run a scan to see the ramp trade-off for that heading.")
                         .font(.caption).foregroundStyle(.tertiary)
                 } else {
