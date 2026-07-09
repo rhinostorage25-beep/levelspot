@@ -28,8 +28,33 @@ struct VehicleSetupView: View {
     @State private var livingSide: LivingSide?
     @State private var showPaywall = false
     @State private var showPairing = false
+    @State private var activeMeasure: MeasureTarget?
 
     enum ChassisAnswer: String { case standard, alko, notSure }
+
+    /// Which Setup field the AR camera measurement should fill in.
+    enum MeasureTarget: String, Identifiable {
+        case wheelbase, track, chassisTrack
+        var id: String { rawValue }
+        var kind: MeasureKind { self == .wheelbase ? .wheelbase : .track }
+    }
+
+    private func applyMeasurement(_ target: MeasureTarget, _ mm: Int) {
+        switch target {
+        case .wheelbase:    manualWheelbase = String(mm)
+        case .track:        manualTrack = String(mm)
+        case .chassisTrack: chassisManualTrack = String(mm)
+        }
+    }
+
+    /// The small "measure with the camera" affordance that sits beside a numeric field. Opens the
+    /// AR flow; the typed field always stays, so this is an alternative, never a replacement.
+    private func cameraButton(_ target: MeasureTarget) -> some View {
+        Button { activeMeasure = target } label: {
+            Image(systemName: "camera.viewfinder")
+        }
+        .buttonStyle(.borderless)
+    }
 
     var body: some View {
         List {
@@ -131,6 +156,9 @@ struct VehicleSetupView: View {
         .navigationTitle("Vehicle Setup")
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
         .navigationDestination(isPresented: $showPairing) { PairingView() }
+        .fullScreenCover(item: $activeMeasure) { target in
+            ARMeasureView(kind: target.kind) { mm in applyMeasurement(target, mm) }
+        }
         .onAppear(perform: prefillFromExisting)
     }
 
@@ -245,14 +273,20 @@ struct VehicleSetupView: View {
     private var manualFields: some View {
         Group {
             LabeledContent("Wheelbase (mm)") {
-                TextField("e.g. 3400", text: $manualWheelbase)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
+                HStack(spacing: 10) {
+                    TextField("e.g. 3400", text: $manualWheelbase)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                    cameraButton(.wheelbase)
+                }
             }
             LabeledContent("Track width (mm)") {
-                TextField("e.g. 1800", text: $manualTrack)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
+                HStack(spacing: 10) {
+                    TextField("e.g. 1800", text: $manualTrack)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                    cameraButton(.track)
+                }
             }
         }
     }
@@ -307,9 +341,12 @@ struct VehicleSetupView: View {
                          : "Exact rear track (mm) — optional, we'll use a typical AL-KO figure if left blank")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField(chassisAnswer == .notSure ? "e.g. 1980" : "typical: \(ref.alkoTypicalRearTrackMM)",
-                              text: $chassisManualTrack)
-                        .keyboardType(.numberPad)
+                    HStack(spacing: 10) {
+                        TextField(chassisAnswer == .notSure ? "e.g. 1980" : "typical: \(ref.alkoTypicalRearTrackMM)",
+                                  text: $chassisManualTrack)
+                            .keyboardType(.numberPad)
+                        cameraButton(.chassisTrack)
+                    }
                 }
             }
         }

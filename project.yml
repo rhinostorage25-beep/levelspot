@@ -31,6 +31,9 @@ targets:
         NSLocationWhenInUseUsageDescription: >-
           LevelSpot uses your position only to recognise pitches you have levelled before.
           Nothing is shared with other users.
+        NSCameraUsageDescription: >-
+          LevelSpot uses the camera only when you choose to measure your vehicle's wheelbase or
+          track width. No photos are taken or stored.
         ITSAppUsesNonExemptEncryption: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:
