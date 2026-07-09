@@ -108,29 +108,41 @@ struct ArrivalView: View {
     @ViewBuilder private func compassGuide(target: Int, current: Int?) -> some View {
         let rel = current.map { relativeBearing(target: target, current: $0) }
         let aligned = (rel.map { abs($0) < 8 }) ?? false
-        VStack(spacing: 8) {
+        let accent: Color = rel == nil ? Color(.systemGray) : (aligned ? Theme.levelGreen : Theme.sun)
+        VStack(spacing: 10) {
             ZStack {
-                Circle().strokeBorder(Color(.separator), lineWidth: 2).frame(width: 96, height: 96)
-                Image(systemName: "triangle.fill")     // the nose (front of the van) sits at the top
-                    .font(.system(size: 9)).foregroundStyle(.secondary).offset(y: -54)
+                Circle().fill(accent.opacity(0.18)).frame(width: 166, height: 166).blur(radius: 7)   // targeting glow
+                Circle().fill(Color.black.opacity(0.9)).frame(width: 150, height: 150)                // scope disc
+                Circle().stroke(accent.opacity(0.45), lineWidth: 1.5).frame(width: 150, height: 150)  // bezel
+                Circle()                                                                              // dotted tick bezel
+                    .stroke(Color.white.opacity(0.28), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [1.5, 9]))
+                    .frame(width: 138, height: 138)
+                Circle().stroke(accent.opacity(0.30), lineWidth: 1).frame(width: 112, height: 112)    // inner rings
+                Circle().stroke(accent.opacity(0.22), lineWidth: 1).frame(width: 70, height: 70)
+                Circle().trim(from: 0, to: 0.5)                                                       // scanning sweep
+                    .stroke(accent.opacity(0.8), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [2, 7]))
+                    .frame(width: 150, height: 150)
+                    .rotationEffect(.degrees(-90))
+                ScopeReticle()                                                                        // fixed crosshair
+                    .stroke((aligned ? Theme.levelGreen : Color.white).opacity(0.62), lineWidth: 1.4)
+                    .frame(width: 156, height: 156)
+                Circle().stroke((aligned ? Theme.levelGreen : Color.white).opacity(0.7), lineWidth: 1.4)
+                    .frame(width: 15, height: 15)
+                ScopeTriangle().fill(accent).frame(width: 12, height: 9).offset(y: -66)               // nose (front)
                 if let rel {
-                    Image(systemName: "location.north.fill")
-                        .font(.system(size: 38))
-                        .foregroundStyle(aligned ? Theme.levelGreen : Theme.sun)
-                        .rotationEffect(.degrees(rel))
-                        .animation(.snappy, value: rel)
-                } else {
-                    Image(systemName: "safari").font(.system(size: 32)).foregroundStyle(.secondary)
+                    scopeNeedle(accent).rotationEffect(.degrees(rel)).animation(.snappy, value: rel)  // target needle
                 }
+                Circle().fill(accent).frame(width: 7, height: 7)
             }
+            .frame(width: 168, height: 168)
             .frame(maxWidth: .infinity)
 
             if let rel {
                 if aligned {
-                    Text("Lined up — the nose is facing the right way.")
+                    Text("Locked on — the nose is facing the right way.")
                         .font(.caption).foregroundStyle(Theme.levelGreen)
                 } else {
-                    Text("Turn \(rel > 0 ? "right" : "left") about \(abs(Int(rel.rounded())))° — rotate until the arrow points to the nose.")
+                    Text("Turn \(rel > 0 ? "right" : "left") about \(abs(Int(rel.rounded())))° — rotate until the needle locks onto the nose.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else {
@@ -139,6 +151,15 @@ struct ArrivalView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// The rotating target needle — points from the scope centre out toward the target heading.
+    private func scopeNeedle(_ color: Color) -> some View {
+        ZStack {
+            Capsule().fill(color).frame(width: 3.5, height: 66).offset(y: -33)
+            ScopeTriangle().fill(color).frame(width: 13, height: 11).offset(y: -74)
+        }
+        .frame(width: 168, height: 168)
     }
 
     @ViewBuilder private var sunPlannerCard: some View {
@@ -378,5 +399,39 @@ struct ArrivalView: View {
         }
         .padding(12)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+// MARK: - Spy-scope compass shapes
+
+/// The fixed targeting crosshair: four capped arms on the N/E/S/W axes, drawn around the centre.
+private struct ScopeReticle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let inner: CGFloat = 16, outer: CGFloat = 48, cap: CGFloat = 5
+        for deg in stride(from: 0.0, through: 270.0, by: 90.0) {
+            let a = deg * .pi / 180
+            let dx = CGFloat(cos(a)), dy = CGFloat(sin(a))
+            let p1 = CGPoint(x: c.x + dx * inner, y: c.y + dy * inner)
+            let p2 = CGPoint(x: c.x + dx * outer, y: c.y + dy * outer)
+            p.move(to: p1); p.addLine(to: p2)
+            let px = -dy, py = dx                       // perpendicular, for the end cap
+            p.move(to: CGPoint(x: p2.x + px * cap, y: p2.y + py * cap))
+            p.addLine(to: CGPoint(x: p2.x - px * cap, y: p2.y - py * cap))
+        }
+        return p
+    }
+}
+
+/// An upward-pointing triangle — the nose marker and the needle's arrowhead.
+private struct ScopeTriangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
     }
 }
