@@ -58,16 +58,19 @@ final class MotionService: SensorSource {
         isRunning = false
     }
 
-    /// One-time flat-surface calibration: whatever the sensor reads right now becomes zero.
+    /// Whether the phone has ever been zeroed on flat ground. Stored (not computed) so the UI
+    /// updates the moment calibration happens. Essential on modern phones — the camera bump means
+    /// a phone laid face-up on a flat surface reads a constant few-degree tilt until it's zeroed.
+    private(set) var isCalibrated = UserDefaults.standard.object(forKey: "calib.rollOffset") != nil
+
+    /// Flat-surface calibration: whatever the sensor reads right now becomes zero, cancelling the
+    /// phone/camera-bump/mounting offset. Call it on ground you KNOW is flat.
     func calibrateHere() {
         rollOffset += rollDeg
         pitchOffset += pitchDeg
         rollDeg = 0
         pitchDeg = 0
-    }
-
-    var isCalibrated: Bool {
-        defaults.object(forKey: "calib.rollOffset") != nil
+        isCalibrated = true
     }
 
     #if targetEnvironment(simulator) || DEBUG

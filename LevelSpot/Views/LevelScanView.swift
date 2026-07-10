@@ -104,9 +104,35 @@ struct LevelScanView: View {
 
     private var measureStage: some View {
         VStack(spacing: 16) {
-            infoBanner("car.side", "Park on the pitch and stop. When you're settled, tap Measure to lock a reading.")
+            infoBanner("car.side", "Park on the pitch and stop. Set the phone down flat where you'll measure, then tap Measure.")
             vanCard(livePlan, roll: motion.rollDeg, pitch: motion.pitchDeg)
+            calibrateCard
         }
+    }
+
+    private var calibrateCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: motion.isCalibrated ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundStyle(motion.isCalibrated ? Theme.levelGreen : Theme.needsRamp)
+                Text(motion.isCalibrated ? "Calibrated" : "Calibrate before you measure")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+            Text("Phones don't lie flat — the camera bump tilts them a degree or two. On ground you KNOW is flat, set the phone down the way you'll measure and tap Calibrate to zero it. You only need to do this occasionally.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button {
+                motion.calibrateHere()
+                Haptics.saved()
+            } label: {
+                Label("Calibrate — I'm on flat ground", systemImage: "scope").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
     // MARK: - Stage 2 · Plan
