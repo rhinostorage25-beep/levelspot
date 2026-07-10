@@ -114,30 +114,33 @@ struct LevelScanView: View {
     // MARK: - The dial
 
     private var dial: some View {
-        let accent: Color = isLevel ? Theme.levelGreen : Theme.needsRamp
+        let spyRed = Color(red: 0.98, green: 0.16, blue: 0.22)
+        let target: Color = isLevel ? Theme.levelGreen : spyRed   // level scope: red targeting → green lock
         return ZStack {
-            Circle().fill(accent.opacity(0.16)).frame(width: dialSize + 18, height: dialSize + 18).blur(radius: 8)
-            Circle().fill(Color.black.opacity(0.9)).frame(width: dialSize, height: dialSize)
+            Circle().fill(target.opacity(0.20)).frame(width: dialSize + 18, height: dialSize + 18).blur(radius: 9)
+            Circle().fill(Color(red: 0.09, green: 0.09, blue: 0.11)).frame(width: dialSize, height: dialSize)
 
-            // Outer SUN ring
-            Circle().stroke(Theme.sun.opacity(0.35), lineWidth: 1.5).frame(width: dialSize - 8, height: dialSize - 8)
+            // Outer SUN ring — amber band (the sun)
+            Circle().stroke(Theme.sun.opacity(0.6), lineWidth: 2.5).frame(width: dialSize - 8, height: dialSize - 8)
+            // Red targeting tick ring
             Circle()
-                .stroke(Color.white.opacity(0.22), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [1.5, 10]))
+                .stroke(target.opacity(0.4), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [1.5, 10]))
                 .frame(width: dialSize - 26, height: dialSize - 26)
             ScopeTriangle().fill(sunAligned ? Theme.levelGreen : Theme.sun)   // NOSE marker (top)
-                .frame(width: 13, height: 10).offset(y: -(dialSize / 2) + 4)
+                .frame(width: 22, height: 17).offset(y: -(dialSize / 2) + 3)
             sunMarker
 
-            // Inner LEVEL target
-            Circle().stroke(Color.white.opacity(0.35), lineWidth: 1.5).frame(width: 132, height: 132)
-            Circle().stroke(Color.white.opacity(0.22), lineWidth: 1).frame(width: 70, height: 70)
-            ScopeReticle().stroke(Color.white.opacity(0.5), lineWidth: 1.2).frame(width: 150, height: 150)
+            // Inner LEVEL target — red targeting scope
+            Circle().stroke(target.opacity(0.5), lineWidth: 1.5).frame(width: 132, height: 132)
+            Circle().stroke(target.opacity(0.35), lineWidth: 1).frame(width: 70, height: 70)
+            ScopeReticle().stroke(target.opacity(0.7), lineWidth: 1.3).frame(width: 150, height: 150)
 
             // The bubble — floats toward the HIGH side (like a spirit level); centre = level.
             Circle()
-                .fill((isLevel ? Theme.levelGreen : Theme.needsRamp).opacity(0.9))
-                .frame(width: 30, height: 30)
-                .overlay(Circle().stroke(.white.opacity(0.8), lineWidth: 1.5))
+                .fill(target)
+                .frame(width: 38, height: 38)
+                .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 2))
+                .shadow(color: target.opacity(0.9), radius: 9)
                 .offset(x: bubbleOffset.width, y: bubbleOffset.height)
                 .animation(.snappy(duration: 0.12), value: bubbleOffset)
         }
@@ -157,9 +160,10 @@ struct LevelScanView: View {
         if let rel = sunRel {
             ZStack {
                 Image(systemName: "sun.max.fill")
-                    .font(.system(size: 20))
+                    .font(.system(size: 34))
                     .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
-                    .offset(y: -(dialSize / 2) + 22)
+                    .shadow(color: (sunAligned ? Theme.levelGreen : Theme.sun).opacity(0.9), radius: 7)
+                    .offset(y: -(dialSize / 2) + 30)
             }
             .frame(width: dialSize, height: dialSize)
             .rotationEffect(.degrees(rel))
