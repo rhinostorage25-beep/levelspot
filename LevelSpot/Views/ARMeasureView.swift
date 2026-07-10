@@ -11,10 +11,10 @@ enum MeasureKind {
 
     func instruction(placingFirst: Bool) -> String {
         switch (self, placingFirst) {
-        case (.wheelbase, true):  return "Aim the cross at where the FRONT wheel meets the ground, then tap Set."
-        case (.wheelbase, false): return "Walk to the REAR wheel (keep the van in view), aim where it meets the ground, then tap Set."
-        case (.track, true):      return "Stand back so both wheels on one axle show. Aim at the base of one wheel, then tap Set."
-        case (.track, false):     return "Aim at the base of the OTHER wheel on the same axle, then tap Set."
+        case (.wheelbase, true):  return "Sweep the phone over the ground first, then aim at the GROUND right where the FRONT wheel touches it, and tap Set."
+        case (.wheelbase, false): return "Walk to the REAR wheel, aim at the GROUND where it touches, then tap Set."
+        case (.track, true):      return "Aim at the GROUND at the base of ONE wheel on this axle, then tap Set — you don't need both wheels in view."
+        case (.track, false):     return "Walk round to the OTHER wheel on the same axle, aim at the GROUND at its base, then tap Set."
         }
     }
 }
@@ -164,7 +164,7 @@ final class ARMeasureModel: NSObject, ObservableObject, ARSessionDelegate {
                 // Grace period: a raycast dropping out for a frame or two must NOT flicker the
                 // reticle green→white or disable the capture button under the user's thumb.
                 self.missFrames += 1
-                if self.missFrames > 8 {
+                if self.missFrames > 15 {
                     self.lastHit = nil
                     if self.hasHit { self.hasHit = false }
                 }
@@ -203,7 +203,13 @@ final class ARMeasureModel: NSObject, ObservableObject, ARSessionDelegate {
     /// before a full plane is detected, from feature points).
     private func centreHit(in arView: ARView) -> SIMD3<Float>? {
         let centre = CGPoint(x: arView.bounds.midX, y: arView.bounds.midY)
-        guard let r = arView.raycast(from: centre, allowing: .estimatedPlane, alignment: .any).first else { return nil }
+        // Once ARKit has found the GROUND plane, extend it to infinity and raycast against THAT —
+        // so the cross lands on the ground even when it's aimed over a featureless black tyre
+        // (the tyre has no trackable features, but the tarmac/grass around it does). Fall back to
+        // an estimated plane from feature points before the ground plane is established.
+        let ground = arView.raycast(from: centre, allowing: .existingPlaneInfinite, alignment: .horizontal).first
+        guard let r = ground ?? arView.raycast(from: centre, allowing: .estimatedPlane, alignment: .any).first
+        else { return nil }
         let c = r.worldTransform.columns.3
         return SIMD3(c.x, c.y, c.z)
     }
