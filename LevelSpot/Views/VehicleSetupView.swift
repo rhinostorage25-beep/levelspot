@@ -1,6 +1,9 @@
 import SwiftUI
 import SwiftData
 
+/// Setup is deliberately vehicle-agnostic: no make/model, no registration lookup, no country-specific
+/// data. Levelling only needs the physical dimensions (wheelbase + track) plus which side you sit out
+/// on (for the sun planner) and your ramps — the same physics anywhere in the world. Measure once.
 struct VehicleSetupView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -9,19 +12,10 @@ struct VehicleSetupView: View {
 
     private let ref = ReferenceStore.shared.data
 
-    // Selection state (mirrors the design handoff's state model)
-    @State private var regInput = ""
-    @State private var regResultText: String?
-    @State private var regLookupFailed = false
-    @State private var lookupInFlight = false
-    @State private var selectedPresetId: String?
-    @State private var isManual = false
-    @State private var manualWheelbase = ""
-    @State private var manualTrack = ""
-    @State private var wheelbaseIndex = 0
-    @State private var chassisAnswer: ChassisAnswer?
-    @State private var chassisManualTrack = ""
-    @State private var chassisExpanded = false
+    @State private var wheelbase = ""
+    @State private var trackFront = ""
+    @State private var trackRear = ""
+    @State private var rearDiffers = false
     @State private var rampsExpanded = false
     @State private var rampProfileId = "default"
     @State private var customSteps = [40, 70, 100]
@@ -30,69 +24,43 @@ struct VehicleSetupView: View {
     @State private var showPairing = false
     @State private var activeMeasure: MeasureTarget?
 
-    enum ChassisAnswer: String { case standard, alko, notSure }
-
-    /// Which Setup field the AR camera measurement should fill in.
+    /// Which measurement the AR camera flow should fill in.
     enum MeasureTarget: String, Identifiable {
-        case wheelbase, track, chassisTrack
+        case wheelbase, trackFront, trackRear
         var id: String { rawValue }
         var kind: MeasureKind { self == .wheelbase ? .wheelbase : .track }
     }
 
     private func applyMeasurement(_ target: MeasureTarget, _ mm: Int) {
         switch target {
-        case .wheelbase:    manualWheelbase = String(mm)
-        case .track:        manualTrack = String(mm)
-        case .chassisTrack: chassisManualTrack = String(mm)
+        case .wheelbase: wheelbase = String(mm)
+        case .trackFront: trackFront = String(mm)
+        case .trackRear:  trackRear = String(mm)
         }
-    }
-
-    /// The small "measure with the camera" affordance that sits beside a numeric field. Opens the
-    /// AR flow; the typed field always stays, so this is an alternative, never a replacement.
-    private func cameraButton(_ target: MeasureTarget) -> some View {
-        Button { activeMeasure = target } label: {
-            Image(systemName: "camera.viewfinder")
-        }
-        .buttonStyle(.borderless)
     }
 
     var body: some View {
         List {
             Section {
-                registrationCard
+                measureField(diagram: AnyView(WheelbaseDiagram()),
+                             label: "Wheelbase (mm)", placeholder: "e.g. 3400",
+                             text: $wheelbase, target: .wheelbase,
+                             hint: "Centre of the front tyre to centre of the rear tyre.")
+                measureField(diagram: AnyView(TrackDiagram()),
+                             label: "Track width (mm)", placeholder: "e.g. 1800",
+                             text: $trackFront, target: .trackFront,
+                             hint: "Centre to centre of the two FRONT tyres, across the van.")
+                Toggle("Rear track is different", isOn: $rearDiffers.animation())
+                if rearDiffers {
+                    measureField(diagram: AnyView(TrackDiagram()),
+                                 label: "Rear track (mm)", placeholder: "e.g. 1980",
+                                 text: $trackRear, target: .trackRear,
+                                 hint: "Centre to centre of the two REAR tyres — wider on some chassis.")
+                }
             } header: {
-                Text("Look up by registration")
+                Text("Measure your van")
             } footer: {
-                Text("This lookup service is occasionally unavailable — you can always choose your vehicle from the list below instead.")
-            }
-
-            Section {
-                ForEach(ref.setupPresets) { preset in
-                    presetRow(preset)
-                }
-                manualRow
-                if isManual { manualFields }
-                if let wb = selectedWheelbases, wb.count > 1 { wheelbasePicker(wb) }
-            } header: {
-                // Not the Section("title") { } shorthand: that overload doesn't support a
-                // trailing footer closure too, and mixing them confuses the compiler's
-                // overload resolution instead of just erroring on the missing combination.
-                Text("Choose your vehicle")
-            } footer: {
-                if usingTypicalDims, let name = selectedPresetName {
-                    Text("Using typical dimensions for \(name) — readings will be labelled **Estimated**. Choose \"Enter manually\" and measure your own for an exact fit.")
-                }
-            }
-
-            if showChassisQuestion {
-                Section {
-                    chassisSummaryRow
-                    if chassisExpanded { chassisOptions }
-                } header: {
-                    Text("Chassis type")
-                } footer: {
-                    Text("Coachbuilt motorhomes often sit on a widened rear chassis for extra stability — enough to change which ramp step we'd recommend. Usually named in the handbook or brochure (\"AL-KO chassis\").")
-                }
+                Text("Just two measurements — no make or model needed, so LevelSpot works for any vehicle, anywhere. Measure with the camera or type them in. All figures in millimetres.")
             }
 
             Section {
@@ -108,7 +76,7 @@ struct VehicleSetupView: View {
             } header: {
                 Text("Which side do you sit out on?")
             } footer: {
-                Text("We say Driver's / Passenger side rather than nearside/offside — those flip meaning between left- and right-hand-drive markets.")
+                Text("Used by the sun & shade planner to work out which way to face the van. Driver's / Passenger side, so it reads the same in left- and right-hand-drive countries.")
             }
 
             Section("Your levelling ramps") {
@@ -153,7 +121,7 @@ struct VehicleSetupView: View {
                 .listRowInsets(EdgeInsets())
             }
         }
-        .navigationTitle("Vehicle Setup")
+        .navigationTitle("Set up")
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
         .navigationDestination(isPresented: $showPairing) { PairingView() }
         .fullScreenCover(item: $activeMeasure) { target in
@@ -162,126 +130,7 @@ struct VehicleSetupView: View {
         .onAppear(perform: prefillFromExisting)
     }
 
-    // MARK: - Registration lookup
-
-    private var registrationCard: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 0) {
-                Text("GB")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 26, height: 44)
-                    .background(Color(red: 0, green: 0.2, blue: 0.6))
-                TextField("AB12 CDE", text: $regInput)
-                    .font(.system(size: 19, weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .frame(height: 44)
-                    .background(Color(red: 1, green: 0.82, blue: 0))
-                    .foregroundStyle(.black)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.black.opacity(0.8), lineWidth: 1.5))
-
-            Button(action: { Task { await lookup() } }) {
-                if lookupInFlight {
-                    Text("Looking up…").frame(maxWidth: .infinity)
-                } else {
-                    Text("Look Up").frame(maxWidth: .infinity)
-                }
-            }
-            .buttonStyle(.bordered)
-            .disabled(regInput.trimmingCharacters(in: .whitespaces).isEmpty || lookupInFlight)
-
-            if let result = regResultText {
-                Label(result, systemImage: "checkmark")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.levelGreen)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if regLookupFailed {
-                Text("Couldn't match that registration — pick your vehicle from the list below.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func lookup() async {
-        lookupInFlight = true
-        regLookupFailed = false
-        regResultText = nil
-        defer { lookupInFlight = false }
-        do {
-            let result = try await SupabaseAPI.lookupRegistration(regInput)
-            guard result.found, let make = result.make else {
-                regLookupFailed = true // expected for coachbuilts registered under the converter's make
-                return
-            }
-            if let preset = ReferenceStore.shared.matchPreset(make: make, model: result.model, year: result.manufactureYear) {
-                selectPreset(preset.id)
-                let year = result.manufactureYear.map(String.init) ?? ""
-                regResultText = "Matched: \(make) \(result.model ?? "") \(year)"
-            } else {
-                regResultText = "Found \(make)\(result.manufactureYear.map { ", \($0)" } ?? "") — confirm your exact vehicle below."
-            }
-        } catch {
-            regLookupFailed = true
-        }
-    }
-
-    // MARK: - Vehicle list
-
-    private func presetRow(_ preset: SetupPreset) -> some View {
-        Button {
-            selectPreset(preset.id)
-        } label: {
-            HStack(spacing: 12) {
-                VanSilhouette(kind: preset.silhouette)
-                    .frame(width: 46, height: 26)
-                    .foregroundStyle(.secondary)
-                Text(preset.name).foregroundStyle(.primary)
-                Spacer()
-                SelectionRing(selected: selectedPresetId == preset.id)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var manualRow: some View {
-        Button {
-            isManual = true
-            selectedPresetId = nil
-            chassisAnswer = nil
-            chassisManualTrack = ""
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "ruler")
-                    .frame(width: 46)
-                    .foregroundStyle(.secondary)
-                Text("Enter manually").foregroundStyle(.primary)
-                Spacer()
-                SelectionRing(selected: isManual)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var manualFields: some View {
-        Group {
-            measureField(diagram: AnyView(WheelbaseDiagram()),
-                         label: "Wheelbase (mm)", placeholder: "e.g. 3400",
-                         text: $manualWheelbase, target: .wheelbase,
-                         hint: "Centre of the front tyre to centre of the rear tyre.")
-            measureField(diagram: AnyView(TrackDiagram()),
-                         label: "Track width (mm)", placeholder: "e.g. 1800",
-                         text: $manualTrack, target: .track,
-                         hint: "Centre to centre of the two front tyres, across the van.")
-        }
-    }
+    // MARK: - Measurement row
 
     /// One measurement: the hint diagram, a typed field, a "measure with camera" button, and the
     /// centre-of-tyre reminder — the mistake being measuring edge-to-edge (reads short).
@@ -307,113 +156,6 @@ struct VehicleSetupView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
-    }
-
-    private func wheelbasePicker(_ variants: [Int]) -> some View {
-        Picker("Wheelbase", selection: $wheelbaseIndex) {
-            ForEach(Array(variants.enumerated()), id: \.offset) { index, mm in
-                Text("\(mm)mm").tag(index)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
-    // MARK: - Chassis question (collapsed row pattern)
-
-    private var showChassisQuestion: Bool {
-        guard let id = selectedPresetId,
-              let preset = ref.setupPresets.first(where: { $0.id == id }) else { return false }
-        return preset.silhouette == "hightop" // Ducato, Sprinter/Crafter — the coachbuilt donor platforms
-    }
-
-    private var chassisSummaryRow: some View {
-        Button {
-            chassisExpanded.toggle()
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(chassisSummaryTitle).foregroundStyle(.primary)
-                    Text(chassisSummarySubtitle)
-                        .font(.caption)
-                        .foregroundStyle(chassisIncomplete ? Theme.needsRamp : Color.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(chassisExpanded ? 90 : 0))
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var chassisOptions: some View {
-        Group {
-            chassisOption(.standard, "Standard chassis", "Same as the base van you picked above")
-            chassisOption(.alko, "Widened (AL-KO) chassis", "Common on coachbuilt motorhomes — check your handbook")
-            chassisOption(.notSure, "Not sure", "We'll ask you to measure your rear track")
-            if chassisAnswer == .alko || chassisAnswer == .notSure {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(chassisAnswer == .notSure
-                         ? "Rear track (mm) — measure between the centre of the rear tyres"
-                         : "Exact rear track (mm) — optional, we'll use a typical AL-KO figure if left blank")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 10) {
-                        TextField(chassisAnswer == .notSure ? "e.g. 1980" : "typical: \(ref.alkoTypicalRearTrackMM)",
-                                  text: $chassisManualTrack)
-                            .keyboardType(.numberPad)
-                        cameraButton(.chassisTrack)
-                    }
-                }
-            }
-        }
-    }
-
-    private func chassisOption(_ answer: ChassisAnswer, _ title: String, _ subtitle: String) -> some View {
-        Button {
-            chassisAnswer = answer
-            // A complete answer collapses back; one needing a follow-up figure stays open.
-            chassisExpanded = (answer != .standard)
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).foregroundStyle(.primary)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                SelectionRing(selected: chassisAnswer == answer)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var chassisIncomplete: Bool {
-        showChassisQuestion && (chassisAnswer == nil || (chassisAnswer == .notSure && chassisManualTrack.isEmpty))
-    }
-
-    private var chassisSummaryTitle: String {
-        switch chassisAnswer {
-        case .standard: return "Standard chassis"
-        case .alko: return "Widened (AL-KO) chassis"
-        case .notSure: return "Not sure"
-        case nil: return "Chassis type"
-        }
-    }
-
-    private var chassisSummarySubtitle: String {
-        switch chassisAnswer {
-        case .standard: return "Same as the base van"
-        case .alko:
-            return chassisManualTrack.isEmpty
-                ? "Using a typical \(ref.alkoTypicalRearTrackMM)mm rear track"
-                : "Rear track: \(chassisManualTrack)mm"
-        case .notSure:
-            return chassisManualTrack.isEmpty
-                ? "Measurement needed before you continue"
-                : "Rear track measured: \(chassisManualTrack)mm"
-        case nil: return "Tap to check — needed for this vehicle"
-        }
     }
 
     // MARK: - Ramps (collapsed row pattern)
@@ -521,46 +263,14 @@ struct VehicleSetupView: View {
         Binding(get: { livingSide }, set: { livingSide = $0 })
     }
 
-    private var selectedPresetName: String? {
-        selectedPresetId.flatMap { id in ref.setupPresets.first { $0.id == id }?.name }
-    }
-
-    private var selectedGeneration: GenerationRef? {
-        selectedPresetId
-            .flatMap { id in ref.setupPresets.first { $0.id == id } }
-            .flatMap { ReferenceStore.shared.generation(id: $0.genId) }
-    }
-
-    private var selectedWheelbases: [Int]? {
-        selectedGeneration?.wheelbasesMm
-    }
-
-    private var usingTypicalDims: Bool { selectedPresetId != nil && !isManual }
-
     private var canContinue: Bool {
-        guard livingSide != nil else { return false }
-        if isManual {
-            return Int(manualWheelbase) != nil && Int(manualTrack) != nil && !chassisIncomplete
-        }
-        return selectedPresetId != nil && !chassisIncomplete
-    }
-
-    private func selectPreset(_ id: String) {
-        selectedPresetId = id
-        isManual = false
-        wheelbaseIndex = 0
-        chassisAnswer = nil
-        chassisManualTrack = ""
-        chassisExpanded = false
+        guard livingSide != nil,
+              Int(wheelbase) != nil, Int(trackFront) != nil else { return false }
+        if rearDiffers { return Int(trackRear) != nil }
+        return true
     }
 
     private func continueTapped() {
-        // The one hard-block: an unanswered chassis question on an AL-KO-eligible vehicle.
-        // Surface it (expand the row) rather than silently refusing to navigate.
-        if chassisIncomplete {
-            chassisExpanded = true
-            return
-        }
         guard let side = livingSide, let config = buildConfig(side: side) else { return }
         for old in existingConfigs { modelContext.delete(old) }
         modelContext.insert(config)
@@ -568,57 +278,26 @@ struct VehicleSetupView: View {
     }
 
     private func buildConfig(side: LivingSide) -> VehicleConfig? {
-        if isManual {
-            guard let wb = Int(manualWheelbase), let track = Int(manualTrack) else { return nil }
-            return VehicleConfig(presetId: nil, genId: nil, displayName: "Custom vehicle",
-                                 wheelbaseMM: wb, trackFrontMM: track, trackRearMM: track,
-                                 chassisKind: .measured, livingSide: side,
-                                 rampProfileId: rampProfileId, customStepsMM: customSteps,
-                                 usingTypicalDims: false)
-        }
-        guard let gen = selectedGeneration, let name = selectedPresetName,
-              let front = gen.trackFrontMm, let rearStandard = gen.trackRearMm else { return nil }
-        let wheelbase = gen.wheelbasesMm.indices.contains(wheelbaseIndex)
-            ? gen.wheelbasesMm[wheelbaseIndex] : gen.wheelbasesMm[0]
-        let (rear, kind): (Int, ChassisKind) = {
-            switch chassisAnswer {
-            case .alko:
-                return (Int(chassisManualTrack) ?? ref.alkoTypicalRearTrackMM, .alko)
-            case .notSure:
-                return (Int(chassisManualTrack) ?? rearStandard, .measured)
-            default:
-                return (rearStandard, .standard)
-            }
-        }()
-        // Any preset keeps the ESTIMATED tag even when the rear track was hand-measured —
-        // wheelbase and front track are still the generation's typical figures.
-        return VehicleConfig(presetId: selectedPresetId, genId: gen.genId, displayName: name,
-                             wheelbaseMM: wheelbase, trackFrontMM: front, trackRearMM: rear,
-                             chassisKind: kind, livingSide: side,
+        guard let wb = Int(wheelbase), let front = Int(trackFront) else { return nil }
+        let rear = rearDiffers ? (Int(trackRear) ?? front) : front
+        return VehicleConfig(presetId: nil, genId: nil, displayName: "My van",
+                             wheelbaseMM: wb, trackFrontMM: front, trackRearMM: rear,
+                             chassisKind: .measured, livingSide: side,
                              rampProfileId: rampProfileId, customStepsMM: customSteps,
-                             usingTypicalDims: true)
+                             usingTypicalDims: false)
     }
 
     private func prefillFromExisting() {
         guard let existing = existingConfigs.first else { return }
-        selectedPresetId = existing.presetId
-        isManual = existing.presetId == nil
-        if isManual {
-            manualWheelbase = String(existing.wheelbaseMM)
-            manualTrack = String(existing.trackRearMM)
-        }
-        if let wbs = selectedWheelbases, let idx = wbs.firstIndex(of: existing.wheelbaseMM) {
-            wheelbaseIndex = idx
+        wheelbase = String(existing.wheelbaseMM)
+        trackFront = String(existing.trackFrontMM)
+        if existing.trackRearMM != existing.trackFrontMM {
+            rearDiffers = true
+            trackRear = String(existing.trackRearMM)
         }
         livingSide = existing.livingSide
         rampProfileId = existing.rampProfileId
         if existing.customStepsMM.count == 3 { customSteps = existing.customStepsMM }
-        switch existing.chassisKind {
-        case .standard: chassisAnswer = .standard
-        case .alko: chassisAnswer = .alko
-        case .measured: chassisAnswer = existing.presetId == nil ? nil : .notSure
-        }
-        if existing.chassisKind != .standard { chassisManualTrack = String(existing.trackRearMM) }
     }
 }
 
@@ -641,46 +320,6 @@ struct ProPill: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 5).padding(.vertical, 2)
             .background(Theme.proBadge, in: RoundedRectangle(cornerRadius: 4))
-    }
-}
-
-/// Custom flat side-profile silhouettes — the brief's one deliberate exception to
-/// SF-Symbols-only, since no built-in symbol distinguishes a van body shape. Three shapes
-/// cover every preset (low-top / high-top LWB / compact panel).
-struct VanSilhouette: View {
-    let kind: String
-
-    var body: some View {
-        Canvas { context, size in
-            let w = size.width, h = size.height
-            var body = Path()
-            switch kind {
-            case "hightop":
-                body.addRoundedRect(in: CGRect(x: 1, y: 1, width: w - 2, height: h * 0.82), cornerSize: CGSize(width: 4, height: 4))
-            case "compact":
-                body.move(to: CGPoint(x: 2, y: h * 0.9))
-                body.addLine(to: CGPoint(x: 2, y: h * 0.55))
-                body.addQuadCurve(to: CGPoint(x: w * 0.28, y: h * 0.28), control: CGPoint(x: w * 0.05, y: h * 0.3))
-                body.addLine(to: CGPoint(x: w * 0.82, y: h * 0.22))
-                body.addQuadCurve(to: CGPoint(x: w - 2, y: h * 0.5), control: CGPoint(x: w - 2, y: h * 0.25))
-                body.addLine(to: CGPoint(x: w - 2, y: h * 0.9))
-                body.closeSubpath()
-            default: // lowtop
-                body.move(to: CGPoint(x: 2, y: h * 0.9))
-                body.addLine(to: CGPoint(x: 2, y: h * 0.45))
-                body.addQuadCurve(to: CGPoint(x: w * 0.18, y: h * 0.28), control: CGPoint(x: w * 0.04, y: h * 0.3))
-                body.addLine(to: CGPoint(x: w * 0.8, y: h * 0.28))
-                body.addQuadCurve(to: CGPoint(x: w - 2, y: h * 0.55), control: CGPoint(x: w - 2, y: h * 0.3))
-                body.addLine(to: CGPoint(x: w - 2, y: h * 0.9))
-                body.closeSubpath()
-            }
-            context.stroke(body, with: .style(.secondary), style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
-            let wheelY = h * 0.9
-            for x in [w * 0.22, w * 0.78] {
-                let wheel = Path(ellipseIn: CGRect(x: x - 3.5, y: wheelY - 3.5, width: 7, height: 7))
-                context.fill(wheel, with: .style(.secondary))
-            }
-        }
     }
 }
 

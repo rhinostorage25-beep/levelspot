@@ -38,7 +38,7 @@ struct RootView: View {
             if configs.isEmpty {
                 VehicleSetupView()
             } else {
-                ArrivalView(config: configs[0])
+                LevelScanView(config: configs[0])
             }
         }
     }

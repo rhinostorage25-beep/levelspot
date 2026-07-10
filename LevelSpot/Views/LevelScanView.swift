@@ -15,8 +15,8 @@ struct LevelScanView: View {
     @State private var audio = AudioCoach()
     @State private var sunPref: SunPreference = .sun
     @State private var armed = false
-    @State private var showSaveSheet = false
     @State private var showCalibrate = false
+    @State private var showSetup = false
     @State private var wasLevel = false
 
     private let dialSize: CGFloat = 280
@@ -69,14 +69,6 @@ struct LevelScanView: View {
         .navigationTitle("Level")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { bottomBar }
-        .sheet(isPresented: $showSaveSheet) {
-            SavePitchSheet(config: config,
-                           corners: LevelMath.cornerHeights(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
-                                                            trackFrontMM: Double(config.trackFrontMM),
-                                                            trackRearMM: Double(config.trackRearMM),
-                                                            wheelbaseMM: Double(config.wheelbaseMM)),
-                           isLevel: isLevel)
-        }
         .onAppear { motion.start(); audio.start(); location.requestAndStart() }
         .onDisappear { motion.stop(); audio.stop() }
         .onChange(of: isLevel) { _, nowLevel in
@@ -84,11 +76,17 @@ struct LevelScanView: View {
             wasLevel = nowLevel
         }
         .sheet(isPresented: $showCalibrate) { CalibrateView() }
+        .navigationDestination(isPresented: $showSetup) { VehicleSetupView() }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { showSetup = true } label: {
+                    Image(systemName: "gearshape").accessibilityLabel("Setup")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) { calibrateButton }
             ToolbarItem(placement: .topBarTrailing) { sunMenu }
             #if DEBUG
-            ToolbarItem(placement: .topBarLeading) { simulateMenu }
+            ToolbarItem(placement: .topBarTrailing) { simulateMenu }
             #endif
         }
     }
@@ -221,13 +219,13 @@ struct LevelScanView: View {
                 }
                 .buttonStyle(.borderedProminent)
             } else {
-                HStack(spacing: 12) {
-                    Button("Stop") { armed = false }
-                        .buttonStyle(.bordered)
-                    Button(isLevel ? "Save this pitch" : "Save anyway") { showSaveSheet = true }
-                        .buttonStyle(.borderedProminent)
-                        .tint(isLevel ? Theme.levelGreen : Color.accentColor)
+                Button { armed = false } label: {
+                    Label(isLevel ? "Done — you're level" : "Stop",
+                          systemImage: isLevel ? "checkmark.circle.fill" : "xmark")
+                        .font(.headline).frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(isLevel ? Theme.levelGreen : Color.accentColor)
             }
         }
         .controlSize(.large)
