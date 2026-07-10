@@ -436,17 +436,17 @@
   ],
   "rampProfiles": [
     { "id": "default", "name": "Generic 3-step", "kind": "stepped", "steps_mm": [40, 70, 100], "pro": false },
-    { "id": "thule", "name": "Thule Levelers", "kind": "stepped", "steps_mm": [44, 78, 112], "pro": false },
-    { "id": "fiamma", "name": "Fiamma Level Up", "kind": "stepped", "steps_mm": [40, 70, 100], "pro": false },
-    { "id": "vonhaus", "name": "VonHaus", "kind": "stepped", "steps_mm": [40, 70, 100], "pro": false },
-    { "id": "milenco_triple", "name": "Milenco Triple", "kind": "stepped", "steps_mm": [40, 80, 120], "pro": false },
-    { "id": "milenco_trident", "name": "Milenco Trident", "kind": "stepped", "steps_mm": [40, 110, 170], "pro": false },
-    { "id": "milenco_quattro", "name": "Milenco Quattro 3", "kind": "stepped", "steps_mm": [40, 90, 130, 180], "pro": false },
-    { "id": "mgi_t3", "name": "MGI T3 Maxi", "kind": "stepped", "steps_mm": [60, 120, 180], "pro": false },
-    { "id": "mgi_wedge", "name": "MGI Milenco Wedge", "kind": "wedge", "steps_mm": [], "max_lift_mm": 110, "increment_mm": 0, "pro": false },
-    { "id": "stacka", "name": "Milenco Stacka blocks", "kind": "blocks", "steps_mm": [], "max_lift_mm": 200, "increment_mm": 40, "pro": false },
-    { "id": "flatjack", "name": "Flat-Jack 2.0 (air)", "kind": "inflatable", "steps_mm": [], "max_lift_mm": 200, "increment_mm": 0, "pro": false },
-    { "id": "locknlevel", "name": "LocknLevel (air)", "kind": "inflatable", "steps_mm": [], "max_lift_mm": 150, "increment_mm": 0, "pro": false },
-    { "id": "milenco_alu", "name": "Milenco Aluminium (ratchet)", "kind": "ratchet", "steps_mm": [], "max_lift_mm": 120, "increment_mm": 0, "pro": false }
+    { "id": "vonhaus", "name": "VonHaus", "kind": "stepped", "steps_mm": [40, 70, 100], "pro": false, "price_gbp": 30 },
+    { "id": "fiamma", "name": "Fiamma Level Up", "kind": "stepped", "steps_mm": [40, 70, 100], "pro": false, "price_gbp": 33 },
+    { "id": "thule", "name": "Thule Levelers", "kind": "stepped", "steps_mm": [44, 78, 112], "pro": false, "price_gbp": 50 },
+    { "id": "milenco_triple", "name": "Milenco Triple", "kind": "stepped", "steps_mm": [40, 80, 120], "pro": false, "price_gbp": 48 },
+    { "id": "milenco_trident", "name": "Milenco Trident", "kind": "stepped", "steps_mm": [40, 110, 170], "pro": false, "price_gbp": 72 },
+    { "id": "milenco_quattro", "name": "Milenco Quattro 3", "kind": "stepped", "steps_mm": [40, 90, 130, 180], "pro": false, "price_gbp": 72, "search_term": "Milenco Quattro 3" },
+    { "id": "mgi_t3", "name": "MGI T3 Maxi", "kind": "stepped", "steps_mm": [60, 120, 180], "pro": false, "search_term": "MGI T3 Maxi Milenco" },
+    { "id": "mgi_wedge", "name": "MGI Milenco Wedge", "kind": "wedge", "steps_mm": [], "max_lift_mm": 110, "increment_mm": 0, "pro": false, "search_term": "MGI Milenco Wedge Level" },
+    { "id": "stacka", "name": "Milenco Stacka blocks", "kind": "blocks", "steps_mm": [], "max_lift_mm": 200, "increment_mm": 40, "pro": false, "search_term": "Milenco Stacka levelling blocks" },
+    { "id": "milenco_alu", "name": "Milenco Aluminium (ratchet)", "kind": "ratchet", "steps_mm": [], "max_lift_mm": 120, "increment_mm": 0, "pro": false, "price_gbp": 105, "search_term": "Milenco Aluminium Leveller" },
+    { "id": "locknlevel", "name": "LocknLevel (air)", "kind": "inflatable", "steps_mm": [], "max_lift_mm": 150, "increment_mm": 0, "pro": false, "price_gbp": 150, "search_term": "LocknLevel air leveller" },
+    { "id": "flatjack", "name": "Flat-Jack 2.0 (air)", "kind": "inflatable", "steps_mm": [], "max_lift_mm": 200, "increment_mm": 0, "pro": false, "search_term": "Flat-Jack Camper 2.0 air leveller" }
   ]
 }

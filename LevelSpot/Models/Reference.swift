@@ -43,9 +43,17 @@ struct RampProfileRef: Decodable, Identifiable {
     let kind: String?         // RampKind raw; absent ⇒ "stepped" (back-compat with old data)
     let maxLiftMm: Int?       // continuous ceiling
     let incrementMm: Int?     // ≈ block height for stackable blocks
+    let priceGbp: Int?        // approx UK price, for the shop cards (nil ⇒ "check price")
+    let searchTerm: String?   // cleaner affiliate-search query when the display name is awkward
 
     var rampKind: RampKind { RampKind(rawValue: kind ?? "stepped") ?? .stepped }
     var ceilingMM: Int { rampKind == .stepped ? (stepsMm.max() ?? 0) : (maxLiftMm ?? 0) }
+
+    /// Affiliate "buy" link — an Amazon UK search for this product carrying the Associates tag.
+    /// A search (not a fixed ASIN) so links never rot as listings change; swap to direct product
+    /// links once real ASINs are added.
+    var buyURL: URL? { AffiliateConfig.amazonSearchURL(searchTerm ?? name) }
+    var priceLabel: String { priceGbp.map { "£\($0)" } ?? "Check price" }
 
     /// The capability handed to the levelling maths.
     var rampSet: RampSet {
@@ -73,6 +81,23 @@ struct ReferenceData: Decodable {
     let rampProfiles: [RampProfileRef]
 }
 
+/// Affiliate-link config. Physical-goods links earn commission WITHOUT Apple's 30% cut (that only
+/// applies to digital IAP), so these are plain web links opened in the browser.
+enum AffiliateConfig {
+    /// ⚠️ PLACEHOLDER — replace with the real Amazon UK Associates tracking tag before shipping
+    /// affiliate links, or commission won't attribute. From Associates Central (looks like "xxxx-21").
+    static let amazonTag = "levelspot0d-21"
+
+    static func amazonSearchURL(_ query: String) -> URL? {
+        var c = URLComponents(string: "https://www.amazon.co.uk/s")
+        c?.queryItems = [
+            URLQueryItem(name: "k", value: "\(query) motorhome levelling ramp"),
+            URLQueryItem(name: "tag", value: amazonTag)
+        ]
+        return c?.url
+    }
+}
+
 final class ReferenceStore {
     static let shared = ReferenceStore()
     let data: ReferenceData
@@ -97,6 +122,22 @@ final class ReferenceStore {
 
     func rampProfile(id: String) -> RampProfileRef? {
         data.rampProfiles.first { $0.id == id }
+    }
+
+    /// Purchasable ramps that clear a required lift, cheapest-that-clears first (unknown price last,
+    /// then least-overkill). `mm == nil` → the whole shop, tallest first. Excludes the generic
+    /// "default" fallback (it's a placeholder, not a product). Powers the affiliate shop sheet.
+    func rampsReaching(mm: Int?) -> [RampProfileRef] {
+        let products = data.rampProfiles.filter { $0.id != "default" }
+        let matching = mm.map { need in products.filter { $0.ceilingMM >= need } } ?? products
+        return matching.sorted { a, b in
+            switch (a.priceGbp, b.priceGbp) {
+            case let (pa?, pb?): return pa != pb ? pa < pb : a.ceilingMM < b.ceilingMM
+            case (nil, _?): return false
+            case (_?, nil): return true
+            default: return a.ceilingMM > b.ceilingMM
+            }
+        }
     }
 
     /// MOT-lookup result -> preset match. Make + year resolve the generation (the

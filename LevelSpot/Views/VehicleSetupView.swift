@@ -22,6 +22,7 @@ struct VehicleSetupView: View {
     @State private var livingSide: LivingSide?
     @State private var showPaywall = false
     @State private var showPairing = false
+    @State private var showShop = false
     @State private var activeMeasure: MeasureTarget?
 
     /// Which measurement the AR camera flow should fill in.
@@ -82,6 +83,9 @@ struct VehicleSetupView: View {
             Section("Your levelling ramps") {
                 rampSummaryRow
                 if rampsExpanded { rampOptions }
+                Button { showShop = true } label: {
+                    Label("Shop levelling ramps", systemImage: "cart")
+                }
             }
 
             Section {
@@ -123,6 +127,7 @@ struct VehicleSetupView: View {
         }
         .navigationTitle("Set up")
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
+        .sheet(isPresented: $showShop) { RampShopSheet(neededMM: nil) }
         .navigationDestination(isPresented: $showPairing) { PairingView() }
         .fullScreenCover(item: $activeMeasure) { target in
             ARMeasureView(kind: target.kind) { mm in applyMeasurement(target, mm) }

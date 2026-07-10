@@ -22,6 +22,8 @@ struct LevelScanView: View {
     @State private var showSetup = false
     @State private var showPaywall = false
     @State private var showInflateGuide = false
+    @State private var showRampShop = false
+    @State private var shopNeededMM: Int?
     @State private var wasLevel = false
 
     private let dialSize: CGFloat = 280
@@ -92,6 +94,7 @@ struct LevelScanView: View {
         }
         .sheet(isPresented: $showCalibrate) { CalibrateView() }
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
+        .sheet(isPresented: $showRampShop) { RampShopSheet(neededMM: shopNeededMM) }
         .fullScreenCover(isPresented: $showInflateGuide) {
             if let config { InflationGuideView(config: config) }
         }
@@ -116,7 +119,18 @@ struct LevelScanView: View {
 
     @ViewBuilder private var noticeZone: some View {
         if let config, let plan {
-            noticeCard(rampNotice(plan, config), tappable: false)
+            if !plan.canLevel {
+                // Can't level here → tap through to the shop (ramps that actually reach the height).
+                Button {
+                    shopNeededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
+                    showRampShop = true
+                } label: {
+                    noticeCard(rampNotice(plan, config), tappable: true)
+                }
+                .buttonStyle(.plain)
+            } else {
+                noticeCard(rampNotice(plan, config), tappable: false)
+            }
         } else {
             // Pro, but the van isn't set up yet — ramp coaching needs the dimensions.
             Button { showSetup = true } label: {
@@ -154,7 +168,7 @@ struct LevelScanView: View {
         let neededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
         if !plan.canLevel {
             return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "You'll never level here",
-                    "Needs ~\(neededMM)mm but your ramps reach \(ceiling)mm. Move to flatter ground, or add packing.", false)
+                    "Needs ~\(neededMM)mm but your ramps reach \(ceiling)mm. Tap for ramps that reach it — or move / add packing.", false)
         }
         if isLevel {
             return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it.", false)
