@@ -74,10 +74,11 @@ final class AudioCoach {
             if node.engine == nil { engine.attach(node) }
             engine.connect(node, to: engine.mainMixerNode, format: format)
             if tones.isEmpty {
-                // A ladder of pitches — the closer to level, the higher the note.
-                tones = [523.0, 622, 740, 880, 1046, 1245].compactMap { Self.tone(freq: $0, ms: 70, format: format) }
-                levelBeep = Self.tone(freq: 1_320, ms: 220, format: format)   // the "you're there" chime
-                lowBeep = Self.tone(freq: 220, ms: 180, format: format)       // the "can't level" low tone
+                // 12 notes across ~1.8 octaves — the closer to level, the higher the note.
+                let ladder: [Double] = [440, 494, 554, 622, 698, 784, 880, 988, 1109, 1245, 1397, 1568]
+                tones = ladder.compactMap { Self.tone(freq: $0, ms: 110, format: format) }
+                levelBeep = Self.tone(freq: 1_760, ms: 240, format: format)   // the "you're there" chime
+                lowBeep = Self.tone(freq: 196, ms: 200, format: format)       // the "can't level" low tone
             }
             if !engine.isRunning { try engine.start() }
             node.play()
@@ -142,7 +143,9 @@ final class AudioCoach {
 
         // Directional by pitch: as you drive up and approach level the note RISES up the ladder
         // and the beeps quicken; past level it falls again — so you can level entirely by ear.
-        let ratio = min(max(offMM / (tolMM * 10), 0), 1)  // 0 ≈ at level, 1 = far off
+        // Mapped across ~400mm of corner spread (≈0–7° on a typical van) so the pitch AUDIBLY
+        // tracks the angle across the whole range, not just the last half-degree before level.
+        let ratio = min(max(offMM / 400, 0), 1)           // 0 ≈ at level, 1 = ~7°+ off
         let proximity = 1 - ratio
         let interval = 0.5 - proximity * 0.4              // far ~0.5s → near ~0.1s
         if accum >= interval {
