@@ -37,9 +37,6 @@ struct ArrivalView: View {
                 } else {
                     newPitchCard
                 }
-                if location.latitude != nil {
-                    sunPlannerCard
-                }
             }
             .padding()
         }
@@ -232,28 +229,10 @@ struct ArrivalView: View {
 
         VStack(spacing: 0) {
             headingRow(color: Theme.levelGreen, title: "Level position",
-                       detail: pitch.levelHeading.map { "You faced \($0)° here — line up the same way, then scan" } ?? "Run a live scan for the exact ramps",
+                       detail: pitch.levelHeading.map { "You faced \($0)° here — line up the same way, then level" } ?? "Open Level to set your ramps",
                        locked: false)
-            Divider().padding(.leading, 52)
-            headingRow(color: Theme.sun, title: "Best sun",
-                       detail: headingDetail(pitch.sunHeading, thing: "sun"),
-                       locked: !entitlements.isPro,
-                       capture: canLog(pitch.sunHeading) ? { logHeading(pitch, \.sunHeading) } : nil)
-            Divider().padding(.leading, 52)
-            headingRow(color: Theme.view, title: "Best view",
-                       detail: headingDetail(pitch.viewHeading, thing: "view"),
-                       locked: !entitlements.isPro,
-                       capture: canLog(pitch.viewHeading) ? { logHeading(pitch, \.viewHeading) } : nil)
         }
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-
-        Text("Sun & view stay reliable here. Ground slope shifts metre to metre — run a live scan for the exact ramps where you actually stop.")
-            .font(.caption).foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-        if entitlements.isPro, conflictExists(pitch) {
-            infoBanner("exclamationmark.triangle", "Sun and view face a different way to level — from your own past visits here.")
-        }
     }
 
     private func pitchMap(_ pitch: PitchRecord) -> some View {
@@ -264,16 +243,6 @@ struct ArrivalView: View {
             UserAnnotation()
             Annotation("Level", coordinate: coordinate) {
                 pin(color: Theme.levelGreen, symbol: "checkmark", locked: false)
-            }
-            if pitch.sunHeading != nil || !entitlements.isPro {
-                Annotation("Sun", coordinate: offset(coordinate, headingDeg: pitch.sunHeading ?? 95)) {
-                    pin(color: Theme.sun, symbol: "sun.max.fill", locked: !entitlements.isPro)
-                }
-            }
-            if pitch.viewHeading != nil || !entitlements.isPro {
-                Annotation("View", coordinate: offset(coordinate, headingDeg: pitch.viewHeading ?? 210)) {
-                    pin(color: Theme.view, symbol: "mountain.2.fill", locked: !entitlements.isPro)
-                }
             }
         }
         .frame(height: 220)
