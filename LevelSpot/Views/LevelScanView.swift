@@ -7,74 +7,83 @@ struct LevelScanView: View {
     @Environment(MotionService.self) private var motion
     @Environment(EntitlementStore.self) private var entitlements
 
+    enum Stage { case measure, plan, levelling }
+    struct Frozen: Equatable { let roll: Double; let pitch: Double }
+
+    @State private var stage: Stage = .measure
+    @State private var frozen: Frozen?
+    @State private var driveForward = true
     @State private var tolerance: Tolerance = .comfort
-    @State private var detailsOpen = false
+    @State private var soundOn = true
     @State private var showPaywall = false
     @State private var showSaveSheet = false
     @State private var wasLevel = false
-    @State private var lastStep: Int?
-    @State private var soundOn = true
     @State private var audio = AudioCoach()
+
+    // MARK: - Derived
+
+    private var effectiveTolerance: Tolerance { entitlements.isPro ? tolerance : .comfort }
+
+    private func planFrom(roll: Double, pitch: Double) -> LevelPlan {
+        RampAdvisor.plan(rollDeg: roll, pitchDeg: pitch,
+                         trackFrontMM: Double(config.trackFrontMM), trackRearMM: Double(config.trackRearMM),
+                         wheelbaseMM: Double(config.wheelbaseMM),
+                         stepsMM: config.activeStepsMM, tolerance: effectiveTolerance)
+    }
+
+    /// Recomputed from the live sensor — used while measuring and while driving up.
+    private var livePlan: LevelPlan { planFrom(roll: motion.rollDeg, pitch: motion.pitchDeg) }
+    /// The FROZEN plan (locked at Measure) — the fixed ramp list you act on. Falls back to live.
+    private var planned: LevelPlan {
+        if let f = frozen { return planFrom(roll: f.roll, pitch: f.pitch) }
+        return livePlan
+    }
+
+    private func cornersFrom(roll: Double, pitch: Double) -> CornerHeights {
+        LevelMath.cornerHeights(rollDeg: roll, pitchDeg: pitch,
+                                trackFrontMM: Double(config.trackFrontMM), trackRearMM: Double(config.trackRearMM),
+                                wheelbaseMM: Double(config.wheelbaseMM))
+    }
+    private var liveCorners: CornerHeights { cornersFrom(roll: motion.rollDeg, pitch: motion.pitchDeg) }
+    private var liveOffMM: Double {
+        let c = [liveCorners.fl, liveCorners.fr, liveCorners.rl, liveCorners.rr]
+        return (c.max() ?? 0) - (c.min() ?? 0)
+    }
+    private var liveDegOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
+    private var toleranceMM: Double { Double(config.activeStepsMM.first ?? 44) / 2 * effectiveTolerance.multiplier }
+
+    private var maxStep: Int { config.activeStepsMM.max() ?? 0 }
+
+    // MARK: - Body
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                verdictBanner
-                vanCard
-                stepsCard
-                detailsSection
-                Toggle(isOn: $soundOn) {
-                    Label(soundOn ? "Audio level guide on" : "Audio level guide off",
-                          systemImage: soundOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                        .font(.subheadline)
+                switch stage {
+                case .measure:   measureStage
+                case .plan:      planStage
+                case .levelling: levellingStage
                 }
-                .tint(Theme.levelGreen)
-                .padding(.horizontal, 4)
-                Text("Beeps speed up as you near level and chime when you're there — no need to keep checking the screen.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
             }
             .padding()
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("Level Scan")
+        .navigationTitle(navTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
-            Button {
-                showSaveSheet = true
-            } label: {
-                Text("Rate & Save This Pitch").font(.headline).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding()
-            .background(.bar)
-        }
+        .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
         .sheet(isPresented: $showSaveSheet) {
-            SavePitchSheet(config: config, corners: corners, isLevel: advice.isLevel)
+            SavePitchSheet(config: config, corners: liveCorners, isLevel: livePlan.isLevel)
         }
-        .onAppear {
-            motion.start()
-            audio.start()
-            pushAudioState()
-        }
-        .onDisappear {
-            motion.stop()
-            audio.stop()
-        }
-        .onChange(of: offLevelMM) { _, _ in pushAudioState() }
-        .onChange(of: soundOn) { _, _ in pushAudioState() }
-        .onChange(of: advice.isLevel) { _, nowLevel in
+        .onAppear { motion.start() }
+        .onDisappear { motion.stop(); audio.stop() }
+        .onChange(of: liveOffMM) { _, _ in if stage == .levelling { pushAudioState() } }
+        .onChange(of: soundOn) { _, _ in if stage == .levelling { pushAudioState() } }
+        .onChange(of: livePlan.isLevel) { _, nowLevel in
+            guard stage == .levelling else { return }
             if nowLevel && !wasLevel { Haptics.levelReached() }
             wasLevel = nowLevel
             pushAudioState()
-        }
-        .onChange(of: advice.wheel?.stepMM) { _, step in
-            if step != lastStep && step != nil { Haptics.stepChanged() }
-            lastStep = step
         }
         .toolbar {
             #if DEBUG
@@ -83,75 +92,163 @@ struct LevelScanView: View {
         }
     }
 
-    // MARK: - Derived state (recomputed live from the sensor; no manual entry anywhere)
-
-    private var effectiveTolerance: Tolerance { entitlements.isPro ? tolerance : .comfort }
-
-    /// The ramped wheel sits on a specific axle, so the lateral maths uses THAT axle's track —
-    /// this is exactly where an AL-KO widened rear differs from the front.
-    private var advice: Advice {
-        let lowEnd: End = motion.pitchDeg > 0 ? .rear : .front
-        let track = Double(lowEnd == .front ? config.trackFrontMM : config.trackRearMM)
-        return RampAdvisor.advise(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
-                                  trackMM: track, wheelbaseMM: Double(config.wheelbaseMM),
-                                  stepsMM: config.activeStepsMM, tolerance: effectiveTolerance)
+    private var navTitle: String {
+        switch stage {
+        case .measure:   return "Measure"
+        case .plan:      return "Ramp plan"
+        case .levelling: return "Levelling"
+        }
     }
 
-    private var corners: CornerHeights {
-        LevelMath.cornerHeights(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
-                                trackMM: Double(config.trackRearMM),
-                                wheelbaseMM: Double(config.wheelbaseMM))
+    // MARK: - Stage 1 · Measure
+
+    private var measureStage: some View {
+        VStack(spacing: 16) {
+            infoBanner("car.side", "Park on the pitch and stop. When you're settled, tap Measure to lock a reading.")
+            vanCard(livePlan, roll: motion.rollDeg, pitch: motion.pitchDeg)
+        }
     }
 
-    /// How un-level the van is, as the full corner-height spread (mm) — the single scalar the
-    /// audio coach maps to beep cadence.
-    private var offLevelMM: Double {
-        let c = [corners.fl, corners.fr, corners.rl, corners.rr]
-        return (c.max() ?? 0) - (c.min() ?? 0)
-    }
+    // MARK: - Stage 2 · Plan
 
-    /// The "level enough" band in mm — same definition `nearestStep` uses, so the audio chime
-    /// fires exactly when the screen says level.
-    private var toleranceMM: Double {
-        Double(config.activeStepsMM.first ?? 44) / 2 * effectiveTolerance.multiplier
-    }
-
-    private func pushAudioState() {
-        audio.update(offMM: offLevelMM, toleranceMM: toleranceMM,
-                     isLevel: advice.isLevel, beyond: advice.beyondRamp, enabled: soundOn)
-    }
-
-    // MARK: - Verdict banner (reflects BOTH axes — never green while one side is out)
-
-    private var verdictBanner: some View {
-        let (text, tint, bg, icon): (String, Color, Color, String) = {
-            if advice.beyondRamp {
-                return ("Too steep here — reposition the van", Theme.needsBigRamp,
-                        Theme.needsBigRamp.opacity(0.14), "exclamationmark.triangle.fill")
+    private var planStage: some View {
+        VStack(spacing: 16) {
+            planVerdict(planned)
+            vanCard(planned, roll: frozen?.roll ?? 0, pitch: frozen?.pitch ?? 0)
+            if !planned.isLevel {
+                Picker("Driving onto the ramps", selection: $driveForward) {
+                    Text("Drive forward on").tag(true)
+                    Text("Reverse on").tag(false)
+                }
+                .pickerStyle(.segmented)
+                rampList(planned)
             }
-            if advice.isLevel {
-                return ("You're level — nice work", Theme.levelGreen,
-                        Theme.levelGreen.opacity(0.14), "checkmark.circle.fill")
+            if entitlements.isPro { toleranceControl }
+        }
+    }
+
+    private func planVerdict(_ plan: LevelPlan) -> some View {
+        let neutral = plan.canLevel && !plan.isLevel      // the normal "here's the plan" case
+        let (text, tint, icon): (String, Color, String) = {
+            if plan.isLevel {
+                return ("Already level — you're good to park.", Theme.levelGreen, "checkmark.circle.fill")
             }
-            return ("Not level yet — follow the steps below", Color(.secondaryLabel),
-                    Color(.secondarySystemGroupedBackground), "arrow.down.to.line")
+            if !plan.canLevel {
+                return ("Can't get fully level here — the tilt needs \(plan.shortfallMM)mm more than your tallest ramp. Reposition, or level as best you can.",
+                        Theme.needsBigRamp, "exclamationmark.triangle.fill")
+            }
+            let n = plan.ramps.count
+            return ("Set \(n) ramp\(n == 1 ? "" : "s") as below, then start levelling.", Color(.label), "list.bullet.rectangle")
         }()
-        return HStack(spacing: 8) {
-            Image(systemName: icon).foregroundStyle(tint)
-            Text(text).font(.callout.weight(.semibold)).foregroundStyle(tint)
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon).foregroundStyle(neutral ? Color(.secondaryLabel) : tint)
+            Text(text).font(.callout.weight(.medium)).foregroundStyle(neutral ? Color(.label) : tint)
             Spacer(minLength: 0)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(bg, in: RoundedRectangle(cornerRadius: 14))
+        .background(neutral ? Color(.secondarySystemGroupedBackground) : tint.opacity(0.14),
+                    in: RoundedRectangle(cornerRadius: 14))
     }
 
-    // MARK: - Van card (top-view diagram + the two live tilt angles)
+    private func rampList(_ plan: LevelPlan) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(plan.ramps.enumerated()), id: \.offset) { i, w in
+                if i > 0 { Divider().padding(.leading, 52) }
+                rampRow(w)
+            }
+        }
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+    }
 
-    private var vanCard: some View {
+    private func rampRow(_ w: WheelRamp) -> some View {
+        let colour: Color = (w.stepMM == maxStep) ? Theme.needsBigRamp : Theme.needsRamp
+        let placement = driveForward ? "in front of" : "behind"
+        return HStack(spacing: 12) {
+            Image(systemName: "arrow.up.circle.fill").font(.title2).foregroundStyle(colour).frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(w.wheelName) · \(w.stepMM ?? 0) mm ramp")
+                    .font(.subheadline.weight(.semibold))
+                Text("Place it \(placement) the tyre, thin end touching. Drive up ~\(w.placementCM ?? 0)cm until it's level.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+    }
+
+    private var toleranceControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("HOW LEVEL").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            Picker("Tolerance", selection: $tolerance) {
+                ForEach(Tolerance.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Text("Fridge operation and general comfort don't need the same precision.")
+                .font(.caption).foregroundStyle(.tertiary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: - Stage 3 · Levelling (drive up)
+
+    private var levellingStage: some View {
+        VStack(spacing: 16) {
+            liveStatusCard
+            vanCard(livePlan, roll: motion.rollDeg, pitch: motion.pitchDeg)
+            rampReminder(planned)
+            audioToggle
+        }
+    }
+
+    private var liveStatusCard: some View {
+        let level = livePlan.isLevel
+        return VStack(spacing: 6) {
+            Text(level ? "LEVEL" : String(format: "%.1f° off", liveDegOff))
+                .font(.system(size: 42, weight: .bold, design: .rounded))
+                .foregroundStyle(level ? Theme.levelGreen : Color(.label))
+                .contentTransition(.numericText())
+            Text(level ? "Stop and put the handbrake on." : "Drive up slowly — the tone rises and holds steady when you're level.")
+                .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background((level ? Theme.levelGreen.opacity(0.14) : Color(.secondarySystemGroupedBackground)),
+                    in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    @ViewBuilder private func rampReminder(_ plan: LevelPlan) -> some View {
+        if !plan.ramps.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "list.bullet.rectangle").foregroundStyle(.secondary)
+                Text(plan.ramps.map { "\($0.wheelName): \($0.stepMM ?? 0)mm" }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var audioToggle: some View {
+        Toggle(isOn: $soundOn) {
+            Label(soundOn ? "Audio guide on" : "Audio guide off",
+                  systemImage: soundOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                .font(.subheadline)
+        }
+        .tint(Theme.levelGreen)
+        .padding(.horizontal, 4)
+    }
+
+    // MARK: - Shared: van diagram + tilt readout
+
+    private func vanCard(_ plan: LevelPlan, roll: Double, pitch: Double) -> some View {
         HStack(alignment: .center, spacing: 20) {
-            vanDiagram
-            tiltReadout
+            vanDiagram(plan)
+            tiltReadout(roll: roll, pitch: pitch)
         }
         .frame(maxWidth: .infinity)
         .padding(20)
@@ -159,7 +256,7 @@ struct LevelScanView: View {
         .overlay(alignment: .topTrailing) { estimatedBadge }
     }
 
-    private var vanDiagram: some View {
+    private func vanDiagram(_ plan: LevelPlan) -> some View {
         VStack(spacing: 5) {
             Text("FRONT").font(.system(size: 10, weight: .heavy)).tracking(2).foregroundStyle(.tertiary)
             ZStack {
@@ -167,9 +264,9 @@ struct LevelScanView: View {
                     .fill(Color(.tertiarySystemFill))
                     .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color(.separator), lineWidth: 1))
                 VStack {
-                    HStack { tyre(.front, .left); Spacer(); tyre(.front, .right) }
+                    HStack { tyre(plan, .front, .left); Spacer(); tyre(plan, .front, .right) }
                     Spacer()
-                    HStack { tyre(.rear, .left); Spacer(); tyre(.rear, .right) }
+                    HStack { tyre(plan, .rear, .left); Spacer(); tyre(plan, .rear, .right) }
                 }
                 .padding(12)
             }
@@ -178,60 +275,49 @@ struct LevelScanView: View {
         }
     }
 
-    /// A wheel: coloured by how far this corner sits below the highest one (from the rigid-body
-    /// corner maths), with the recommended ramp step badged on the wheels that actually get one.
-    private func tyre(_ end: End, _ side: Side) -> some View {
-        let step = stepBadge(end, side)
-        let color = wheelColor(end, side)
+    private func wheelRamp(_ plan: LevelPlan, _ end: End, _ side: Side) -> WheelRamp? {
+        plan.wheels.first { $0.end == end && $0.side == side }
+    }
+
+    private func tyre(_ plan: LevelPlan, _ end: End, _ side: Side) -> some View {
+        let w = wheelRamp(plan, end, side)
+        let needs = w?.needsRamp ?? false
+        let colour: Color = plan.isLevel ? Theme.levelGreen
+            : (needs ? (plan.canLevel ? Theme.needsRamp : Theme.needsBigRamp) : Color(.systemGray3))
         return VStack(spacing: 4) {
-            if end == .rear, let step { stepPill(step, color) }
-            RoundedRectangle(cornerRadius: 3).fill(color).frame(width: 14, height: 30)
-            if end == .front, let step { stepPill(step, color) }
+            if end == .rear, let step = w?.stepMM { stepPill(step, colour) }
+            RoundedRectangle(cornerRadius: 3).fill(colour).frame(width: 14, height: 30)
+            if end == .front, let step = w?.stepMM { stepPill(step, colour) }
         }
     }
 
-    private func stepPill(_ mm: Int, _ color: Color) -> some View {
+    private func stepPill(_ mm: Int, _ colour: Color) -> some View {
         Text("\(mm)mm")
             .font(.system(size: 9, weight: .bold))
             .foregroundStyle(.white)
             .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(color, in: Capsule())
+            .background(colour, in: Capsule())
     }
 
-    private var tiltReadout: some View {
+    private func tiltReadout(roll: Double, pitch: Double) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            tiltStat(title: "Side-to-side", deg: motion.rollDeg, detail: rollDetail,
-                     axisLevel: advice.wheel == nil && !advice.lateralBeyondRamp,
-                     beyond: advice.lateralBeyondRamp)
-            tiltStat(title: "Front-to-back", deg: motion.pitchDeg, detail: pitchDetail,
-                     axisLevel: advice.longStepMM == nil && !advice.longBeyondRamp,
-                     beyond: advice.longBeyondRamp)
+            tiltStat(title: "Side-to-side", deg: roll,
+                     detail: abs(roll) < 0.2 ? "level" : (roll > 0 ? "left side high" : "right side high"))
+            tiltStat(title: "Front-to-back", deg: pitch,
+                     detail: abs(pitch) < 0.2 ? "level" : (pitch > 0 ? "nose high" : "nose low"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func tiltStat(title: String, deg: Double, detail: String,
-                          axisLevel: Bool, beyond: Bool) -> some View {
+    private func tiltStat(title: String, deg: Double, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(String(format: "%.1f°", abs(deg)))
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .foregroundStyle(beyond ? Theme.needsBigRamp : (axisLevel ? Theme.levelGreen : Color(.label)))
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .foregroundStyle(abs(deg) < 0.2 ? Theme.levelGreen : Color(.label))
                 .contentTransition(.numericText())
             Text(detail).font(.caption2).foregroundStyle(.secondary)
         }
-    }
-
-    private var rollDetail: String {
-        if advice.lateralBeyondRamp { return "way over — reposition" }
-        if abs(motion.rollDeg) < 0.1 { return "level" }
-        return motion.rollDeg > 0 ? "left side high" : "right side high"
-    }
-
-    private var pitchDetail: String {
-        if advice.longBeyondRamp { return "way over — reposition" }
-        if abs(motion.pitchDeg) < 0.1 { return "level" }
-        return motion.pitchDeg > 0 ? "nose high" : "nose low"
     }
 
     @ViewBuilder private var estimatedBadge: some View {
@@ -245,152 +331,73 @@ struct LevelScanView: View {
         }
     }
 
-    // MARK: - Wheel colouring / badges
-
-    private var maxCornerHeight: Double { max(corners.fl, corners.fr, corners.rl, corners.rr) }
-
-    private func cornerHeight(_ end: End, _ side: Side) -> Double {
-        switch (end, side) {
-        case (.front, .left): return corners.fl
-        case (.front, .right): return corners.fr
-        case (.rear, .left): return corners.rl
-        case (.rear, .right): return corners.rr
-        }
-    }
-
-    private func wheelColor(_ end: End, _ side: Side) -> Color {
-        if advice.isLevel { return Theme.levelGreen }
-        let raise = maxCornerHeight - cornerHeight(end, side)
-        if raise < 3 { return Color(.systemGray3) }   // a high corner — it stays on the ground
-        return advice.beyondRamp ? Theme.needsBigRamp : Theme.needsRamp
-    }
-
-    /// The recommended ramp step for a wheel, if it's one the advice actually ramps (nil when
-    /// beyond range, so no misleading figure is stamped on a van that needs repositioning).
-    private func stepBadge(_ end: End, _ side: Side) -> Int? {
-        var candidates: [Int] = []
-        if let w = advice.wheel, w.end == end, w.side == side { candidates.append(w.stepMM) }
-        if let ls = advice.longStepMM, advice.lowEnd == end { candidates.append(ls) }
-        return candidates.max()
-    }
-
-    // MARK: - Step instructions (per axis, honest about un-rampable tilts)
-
-    private enum StepState { case level, ramp(String, Color), beyond }
-
-    private var lateralState: StepState {
-        if advice.lateralBeyondRamp { return .beyond }
-        if let w = advice.wheel {
-            return .ramp("\(w.wheelName) · \(w.stepMM)mm ramp, start ~\(w.placementCM)cm out", severity(w.stepMM))
-        }
-        return .level
-    }
-
-    private var longState: StepState {
-        if advice.longBeyondRamp { return .beyond }
-        if let s = advice.longStepMM, let p = advice.longPlacementCM, let e = advice.lowEnd {
-            return .ramp("\(e == .front ? "Front" : "Rear") wheels · \(s)mm ramp, start ~\(p)cm out", severity(s))
-        }
-        return .level
-    }
-
-    private func severity(_ step: Int) -> Color {
-        guard let idx = config.activeStepsMM.firstIndex(of: step) else { return Theme.needsRamp }
-        return idx >= config.activeStepsMM.count - 1 ? Theme.needsBigRamp : Theme.needsRamp
-    }
-
-    private var stepsCard: some View {
-        VStack(spacing: 0) {
-            stepLine(title: "Side-to-side", state: lateralState)
-            Divider().padding(.leading, 48)
-            stepLine(title: "Front-to-back", state: longState)
-        }
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-    }
-
-    private func stepLine(title: String, state: StepState) -> some View {
-        let (icon, iconColor, detail, detailColor): (String, Color, String, Color) = {
-            switch state {
-            case .level:
-                return ("checkmark.circle.fill", Theme.levelGreen, "level", Theme.levelGreen)
-            case .beyond:
-                return ("exclamationmark.triangle.fill", Theme.needsBigRamp,
-                        "too steep for a ramp — reposition", Theme.needsBigRamp)
-            case .ramp(let text, let c):
-                return ("arrow.up.forward.circle.fill", c, text, Color(.secondaryLabel))
-            }
-        }()
-        return HStack(spacing: 12) {
-            Image(systemName: icon).font(.title3).foregroundStyle(iconColor).frame(width: 24)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(detailColor)
-            }
+    private func infoBanner(_ symbol: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(.secondary)
+            Text(text).font(.callout).foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
-    // MARK: - Details (Pro: tolerance + exact per-corner offsets)
+    // MARK: - Bottom bar (per stage)
 
-    private var detailsSection: some View {
-        VStack(spacing: 0) {
-            Button {
-                if entitlements.isPro {
-                    withAnimation(.snappy) { detailsOpen.toggle() }
-                } else {
-                    showPaywall = true
+    @ViewBuilder private var bottomBar: some View {
+        Group {
+            switch stage {
+            case .measure:
+                Button { freeze() } label: {
+                    Label("Measure", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Text("Details").font(.subheadline.weight(.medium))
-                    Image(systemName: entitlements.isPro ? "chevron.right" : "lock")
-                        .font(.caption.weight(.semibold))
-                        .rotationEffect(.degrees(entitlements.isPro && detailsOpen ? 90 : 0))
-                }
-            }
-            .padding(8)
+                .buttonStyle(.borderedProminent).controlSize(.large)
 
-            if detailsOpen && entitlements.isPro {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("LEVEL TOLERANCE").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                    Picker("Tolerance", selection: $tolerance) {
-                        ForEach(Tolerance.allCases, id: \.self) { Text($0.label).tag($0) }
+            case .plan:
+                HStack(spacing: 12) {
+                    Button("Re-measure") { reset() }
+                        .buttonStyle(.bordered)
+                    Button(planned.isLevel ? "Save pitch" : "Start levelling") {
+                        if planned.isLevel { showSaveSheet = true } else { startLevelling() }
                     }
-                    .pickerStyle(.segmented)
-                    Text("Fridge operation and general comfort don't need the same precision.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                    Divider()
-                    // Per-corner offsets in mm — the honest per-corner quantity a single rigid
-                    // body has (per-corner "degrees" would be theatre).
-                    cornerRow("Front Left", corners.fl)
-                    cornerRow("Front Right", corners.fr)
-                    cornerRow("Rear Left", corners.rl)
-                    cornerRow("Rear Right", corners.rr)
-                    Divider()
-                    HStack {
-                        Text("Sensor confidence").foregroundStyle(.secondary)
-                        Spacer()
-                        Text(motion.isSteady ? "High · vehicle steady" : "Medium · vehicle moving")
-                            .fontWeight(.semibold)
-                    }
-                    .font(.footnote)
-                    Text("Derived from a single tilt reading plus your vehicle's known dimensions — no sensor hardware needed at every wheel.")
-                        .font(.caption).foregroundStyle(.tertiary)
+                    .buttonStyle(.borderedProminent)
                 }
-                .padding(16)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                .controlSize(.large).frame(maxWidth: .infinity)
+
+            case .levelling:
+                HStack(spacing: 12) {
+                    Button("Re-measure") { audio.stop(); reset() }
+                        .buttonStyle(.bordered)
+                    Button("Save pitch") { showSaveSheet = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(livePlan.isLevel ? Theme.levelGreen : Color.accentColor)
+                }
+                .controlSize(.large).frame(maxWidth: .infinity)
             }
         }
+        .padding()
+        .background(.bar)
     }
 
-    private func cornerRow(_ label: String, _ mm: Double) -> some View {
-        HStack {
-            Text(label).foregroundStyle(.secondary)
-            Spacer()
-            Text(String(format: "%+.0fmm", mm)).fontWeight(.semibold).monospacedDigit()
-        }
-        .font(.footnote)
+    // MARK: - Actions
+
+    private func freeze() {
+        frozen = Frozen(roll: motion.rollDeg, pitch: motion.pitchDeg)
+        stage = .plan
+    }
+    private func startLevelling() {
+        stage = .levelling
+        wasLevel = livePlan.isLevel
+        audio.start()
+        pushAudioState()
+    }
+    private func reset() {
+        frozen = nil
+        stage = .measure
+    }
+    private func pushAudioState() {
+        audio.update(offMM: liveOffMM, toleranceMM: toleranceMM,
+                     isLevel: livePlan.isLevel, beyond: !planned.canLevel, enabled: soundOn)
     }
 
     #if DEBUG

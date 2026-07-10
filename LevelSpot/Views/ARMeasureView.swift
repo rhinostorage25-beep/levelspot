@@ -72,17 +72,26 @@ struct ARMeasureView: View {
 
             Spacer()
 
-            if let mm = model.phase == .done ? model.resultMM : model.liveMM {
-                Text(Self.format(mm))
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-                    .background(.black.opacity(0.55), in: Capsule())
-            } else if !model.hasHit {
-                Text("Move the phone slowly to find the surface…")
-                    .font(.footnote).foregroundStyle(.white.opacity(0.8))
-                    .padding(8).background(.black.opacity(0.45), in: Capsule())
+            // Fixed-height status zone — a constant slot so the capture button never shifts
+            // position under the user's thumb as the readout appears/changes.
+            Group {
+                if let mm = model.phase == .done ? model.resultMM : model.liveMM {
+                    Text(Self.format(mm))
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(.black.opacity(0.55), in: Capsule())
+                } else if model.hasHit {
+                    Text("Ready — line up the cross and tap Set.")
+                        .font(.footnote).foregroundStyle(.white.opacity(0.85))
+                        .padding(8).background(.black.opacity(0.45), in: Capsule())
+                } else {
+                    Text("Move the phone slowly to find the surface…")
+                        .font(.footnote).foregroundStyle(.white.opacity(0.85))
+                        .padding(8).background(.black.opacity(0.45), in: Capsule())
+                }
             }
+            .frame(height: 52)
 
             buttonRow.padding().padding(.bottom, 8)
         }
@@ -137,20 +146,35 @@ final class ARMeasureModel: NSObject, ObservableObject, ARSessionDelegate {
 
     weak var arView: ARView?
     private var p1: SIMD3<Float>?
+    private var lastHit: SIMD3<Float>?
+    private var missFrames = 0
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         guard let arView else { return }
         let hit = centreHit(in: arView)
         DispatchQueue.main.async {
-            self.hasHit = hit != nil
-            if self.phase == .second, let p1 = self.p1, let hit {
-                self.liveMM = Int((simd_distance(p1, hit) * 1000).rounded())
+            if let hit {
+                self.lastHit = hit
+                self.missFrames = 0
+                if !self.hasHit { self.hasHit = true }
+                if self.phase == .second, let p1 = self.p1 {
+                    self.liveMM = Int((simd_distance(p1, hit) * 1000).rounded())
+                }
+            } else {
+                // Grace period: a raycast dropping out for a frame or two must NOT flicker the
+                // reticle green→white or disable the capture button under the user's thumb.
+                self.missFrames += 1
+                if self.missFrames > 8 {
+                    self.lastHit = nil
+                    if self.hasHit { self.hasHit = false }
+                }
             }
         }
     }
 
     func place() {
-        guard let arView, let point = centreHit(in: arView) else { return }
+        // Use the last good hit, so a tap during a momentary raycast drop-out still lands.
+        guard let arView, let point = lastHit ?? centreHit(in: arView) else { return }
         addMarker(at: point, in: arView)
         switch phase {
         case .first:

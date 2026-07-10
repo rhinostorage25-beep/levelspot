@@ -109,4 +109,38 @@ final class LevelMathTests: XCTestCase {
         XCTAssertFalse(advice.lateralBeyondRamp)
         XCTAssertEqual(advice.wheel?.stepMM, 112)
     }
+
+    // P1: multi-ramp plan — pure roll ramps BOTH wheels on the low (right) side by the same step.
+    func testP1PureRollRampsBothLowSideWheels() {
+        let plan = RampAdvisor.plan(rollDeg: 2.86, pitchDeg: 0, trackFrontMM: 1790, trackRearMM: 1790,
+                                    wheelbaseMM: 3450, stepsMM: defaultSteps, tolerance: .comfort)
+        XCTAssertFalse(plan.isLevel)
+        XCTAssertTrue(plan.canLevel)
+        XCTAssertEqual(Set(plan.ramps.map(\.wheelName)), ["Front Right", "Rear Right"])
+        XCTAssertTrue(plan.ramps.allSatisfy { $0.stepMM == 78 })
+    }
+
+    // P2: near-level → no ramps at all.
+    func testP2LevelPlanHasNoRamps() {
+        let plan = RampAdvisor.plan(rollDeg: 0.3, pitchDeg: 0, trackFrontMM: 1790, trackRearMM: 1790,
+                                    wheelbaseMM: 3450, stepsMM: defaultSteps, tolerance: .comfort)
+        XCTAssertTrue(plan.isLevel)
+        XCTAssertTrue(plan.ramps.isEmpty)
+    }
+
+    // P3: honest "can't level here" — 5° roll spreads the corners 157mm, past the 112mm tallest ramp.
+    func testP3CannotLevelBeyondTallestRamp() {
+        let plan = RampAdvisor.plan(rollDeg: 5, pitchDeg: 0, trackFrontMM: 1790, trackRearMM: 1790,
+                                    wheelbaseMM: 3450, stepsMM: defaultSteps, tolerance: .comfort)
+        XCTAssertFalse(plan.canLevel)
+        XCTAssertEqual(plan.shortfallMM, 45)
+    }
+
+    // P4: roll + pitch → three wheels ramped, each a different height (the highest corner stays down).
+    func testP4RollAndPitchRampsThreeWheels() {
+        let plan = RampAdvisor.plan(rollDeg: -2, pitchDeg: 1, trackFrontMM: 1790, trackRearMM: 1790,
+                                    wheelbaseMM: 3450, stepsMM: defaultSteps, tolerance: .comfort)
+        XCTAssertEqual(plan.ramps.count, 3)
+        XCTAssertEqual(Set(plan.ramps.map(\.wheelName)), ["Front Left", "Rear Left", "Rear Right"])
+    }
 }

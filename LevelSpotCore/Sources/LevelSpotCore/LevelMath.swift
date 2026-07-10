@@ -32,6 +32,22 @@ public enum LevelMath {
         )
     }
 
+    /// Per-corner heights using the ACTUAL front and rear tracks (they differ on AL-KO chassis),
+    /// so the per-wheel ramp plan is exact rather than assuming one track for both axles.
+    public static func cornerHeights(rollDeg: Double, pitchDeg: Double,
+                                     trackFrontMM: Double, trackRearMM: Double,
+                                     wheelbaseMM: Double) -> CornerHeights {
+        let halfPitch = wheelbaseMM * tan(pitchDeg * .pi / 180) / 2
+        let frontRoll = trackFrontMM * tan(rollDeg * .pi / 180) / 2
+        let rearRoll = trackRearMM * tan(rollDeg * .pi / 180) / 2
+        return CornerHeights(
+            fl: halfPitch + frontRoll,
+            fr: halfPitch - frontRoll,
+            rl: -halfPitch + rearRoll,
+            rr: -halfPitch - rearRoll
+        )
+    }
+
     /// Height deficit (mm) of the low side across an axle for a given roll.
     public static func lateralDeficitMM(rollDeg: Double, trackMM: Double) -> Double {
         trackMM * tan(abs(rollDeg) * .pi / 180)

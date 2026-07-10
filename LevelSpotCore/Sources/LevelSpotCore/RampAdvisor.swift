@@ -58,6 +58,36 @@ public struct Advice: Equatable, Sendable {
     public var isLevel: Bool { wheel == nil && longStepMM == nil && !beyondRamp }
 }
 
+/// One wheel in the multi-ramp plan: how much it must rise, and the ramp to use for it.
+public struct WheelRamp: Equatable, Sendable {
+    public let end: End
+    public let side: Side
+    public let liftMM: Int        // exact rise this wheel needs to bring the body level
+    public let stepMM: Int?       // the ramp step to use, nil when the wheel needs no ramp
+    public let placementCM: Int?  // run distance up the ramp to reach the lift
+
+    public var needsRamp: Bool { stepMM != nil }
+    public var wheelName: String {
+        "\(end == .front ? "Front" : "Rear") \(side == .left ? "Left" : "Right")"
+    }
+}
+
+/// The whole-vehicle levelling plan from ONE frozen measurement — the honest, real-world model:
+/// each low wheel gets its own ramp height, and if the corner spread exceeds the tallest ramp it
+/// says so plainly instead of pretending.
+public struct LevelPlan: Equatable, Sendable {
+    public let wheels: [WheelRamp]   // all four, in the fixed order FL, FR, RL, RR
+    public let isLevel: Bool         // already level — nothing to ramp
+    public let canLevel: Bool        // the tilt CAN be levelled with the ramps on hand
+    public let shortfallMM: Int      // how far past the tallest ramp the tilt runs (0 when canLevel)
+    public let lowEnd: End           // which end is lower — for the drive-on wording
+
+    /// Just the wheels that actually need a ramp, low-to-high (biggest lift first).
+    public var ramps: [WheelRamp] {
+        wheels.filter { $0.needsRamp }.sorted { $0.liftMM > $1.liftMM }
+    }
+}
+
 public enum RampAdvisor {
     /// Default wedge slope: 4.3mm of rise per cm of run along the ramp. Used when the
     /// profile has no per-step placement data of its own (brand profiles can override later).
@@ -121,6 +151,47 @@ public enum RampAdvisor {
             longPlacementCM: longStep.map(placementCM(forStepMM:)),
             lateralBeyondRamp: lateralBeyond,
             longBeyondRamp: longBeyond
+        )
+    }
+
+    /// The whole-vehicle multi-ramp plan from one frozen reading. Each corner's required lift is
+    /// `highest corner − this corner`; the highest corner stays on the ground (0). The tilt is
+    /// levellable when the corner SPREAD fits under the tallest ramp — otherwise the lowest wheel
+    /// can't be raised enough and we say so (`canLevel == false`, with the shortfall).
+    public static func plan(rollDeg: Double, pitchDeg: Double,
+                            trackFrontMM: Double, trackRearMM: Double, wheelbaseMM: Double,
+                            stepsMM: [Int], tolerance: Tolerance) -> LevelPlan {
+        let c = LevelMath.cornerHeights(rollDeg: rollDeg, pitchDeg: pitchDeg,
+                                        trackFrontMM: trackFrontMM, trackRearMM: trackRearMM,
+                                        wheelbaseMM: wheelbaseMM)
+        let corners: [(End, Side, Double)] = [
+            (.front, .left, c.fl), (.front, .right, c.fr),
+            (.rear, .left, c.rl), (.rear, .right, c.rr),
+        ]
+        let heights = corners.map { $0.2 }
+        let maxH = heights.max() ?? 0
+        let minH = heights.min() ?? 0
+        let tallest = stepsMM.max() ?? 0
+        let tolMM = Double(stepsMM.min() ?? 44) / 2 * tolerance.multiplier
+
+        let wheels = corners.map { corner -> WheelRamp in
+            let (end, side, h) = corner
+            let lift = maxH - h
+            guard lift >= tolMM else {
+                return WheelRamp(end: end, side: side, liftMM: Int(lift.rounded()), stepMM: nil, placementCM: nil)
+            }
+            let step = nearestStep(deficitMM: lift, stepsMM: stepsMM, tolerance: tolerance)
+            return WheelRamp(end: end, side: side, liftMM: Int(lift.rounded()),
+                             stepMM: step, placementCM: step.map(placementCM(forStepMM:)))
+        }
+
+        let spread = maxH - minH
+        return LevelPlan(
+            wheels: wheels,
+            isLevel: !wheels.contains { $0.needsRamp },
+            canLevel: spread <= Double(tallest) + tolMM,
+            shortfallMM: max(0, Int((spread - Double(tallest)).rounded())),
+            lowEnd: pitchDeg > 0 ? .rear : .front
         )
     }
 }

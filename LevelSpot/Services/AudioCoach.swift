@@ -16,7 +16,7 @@ import UIKit
 final class AudioCoach {
     private let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
-    private var beep: AVAudioPCMBuffer?
+    private var tones: [AVAudioPCMBuffer] = []   // low→high pitch, chosen by how close to level
     private var levelBeep: AVAudioPCMBuffer?
     private var lowBeep: AVAudioPCMBuffer?
 
@@ -73,10 +73,11 @@ final class AudioCoach {
             guard let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1) else { return false }
             if node.engine == nil { engine.attach(node) }
             engine.connect(node, to: engine.mainMixerNode, format: format)
-            if beep == nil {
-                beep = Self.tone(freq: 880, ms: 70, format: format)
-                levelBeep = Self.tone(freq: 1_320, ms: 200, format: format)
-                lowBeep = Self.tone(freq: 220, ms: 180, format: format)
+            if tones.isEmpty {
+                // A ladder of pitches — the closer to level, the higher the note.
+                tones = [523.0, 622, 740, 880, 1046, 1245].compactMap { Self.tone(freq: $0, ms: 70, format: format) }
+                levelBeep = Self.tone(freq: 1_320, ms: 220, format: format)   // the "you're there" chime
+                lowBeep = Self.tone(freq: 220, ms: 180, format: format)       // the "can't level" low tone
             }
             if !engine.isRunning { try engine.start() }
             node.play()
@@ -119,23 +120,35 @@ final class AudioCoach {
 
     private func tick() {
         guard started, enabled else { accum = 0; return }
+        accum += Self.tickInterval
+
         if isLevelState {
-            if !announcedLevel {                 // rising two-note chime, once, on reaching level
+            if !announcedLevel {                          // rising two-note chime, once, on reaching level
                 announcedLevel = true
-                schedule(levelBeep)
-                schedule(levelBeep)
+                schedule(levelBeep); schedule(levelBeep)
+                accum = 0
+                return
             }
-            accum = 0
+            // A slow steady top-note pulse so you KNOW you're still level (not just silence).
+            if accum >= 0.6 { accum = 0; schedule(tones.last) }
             return
         }
         announcedLevel = false
-        accum += Self.tickInterval
-        // Far off = slow (~1.2s), near the tolerance band = fast (~0.15s).
-        let ratio = min(max(offMM / (tolMM * 8), 0), 1)
-        let target = beyondState ? 1.4 : (0.15 + ratio * 1.05)
-        if accum >= target {
+
+        if beyondState {                                  // can't level here — slow, low, ominous
+            if accum >= 1.4 { accum = 0; schedule(lowBeep) }
+            return
+        }
+
+        // Directional by pitch: as you drive up and approach level the note RISES up the ladder
+        // and the beeps quicken; past level it falls again — so you can level entirely by ear.
+        let ratio = min(max(offMM / (tolMM * 10), 0), 1)  // 0 ≈ at level, 1 = far off
+        let proximity = 1 - ratio
+        let interval = 0.5 - proximity * 0.4              // far ~0.5s → near ~0.1s
+        if accum >= interval {
             accum = 0
-            schedule(beyondState ? lowBeep : beep)
+            let idx = min(tones.count - 1, max(0, Int((proximity * Double(tones.count - 1)).rounded())))
+            if !tones.isEmpty { schedule(tones[idx]) }
         }
     }
 
