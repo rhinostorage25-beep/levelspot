@@ -20,11 +20,13 @@ final class EntitlementStore {
     /// App Store Connect (and any local .storekit config used for simulator testing).
     static let proProductID = "uk.co.levelspot.pro"
 
-    /// ⚠️ TEMPORARY — TESTFLIGHT TESTING ONLY. Forces every Pro surface on so beta testers can
-    /// exercise them before the `uk.co.levelspot.pro` product + Paid Applications Agreement exist
-    /// (a real purchase literally can't transact yet). Applies in Release too, unlike the DEBUG
-    /// toggle below. **MUST be set back to `false` before the App Store submission.**
-    static let forceProForTesting = true
+    /// ⚠️ TEMPORARY TESTFLIGHT LEVER. Applies in Release (unlike the DEBUG toggle below).
+    /// - `true`  → forces every Pro surface ON (demo the Pro app; the `uk.co.levelspot.pro`
+    ///            product doesn't exist yet so a real purchase can't transact).
+    /// - `false` → shows the FREE tier + paywall (what this build is for). Pro features stay
+    ///            locked until the IAP product exists in App Store Connect.
+    /// **MUST be `false` before the App Store submission** either way — see the memory note.
+    static let forceProForTesting = false
 
     private(set) var isPro = forceProForTesting
     private(set) var proProduct: Product?

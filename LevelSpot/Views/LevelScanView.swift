@@ -1,12 +1,15 @@
 import SwiftUI
 import LevelSpotCore
 
-/// The one screen — a guided level. FIXED layout: the dial never moves and every text zone is a
-/// constant-height slot whose content swaps but whose size never changes, so nothing jumps as the
-/// tilt crosses thresholds. A coach line + one button walk you through: Start → drive up → level.
-/// The "you're level" alert only arms after you tap Start, so it doesn't chime while you handle it.
+/// The one screen.
+/// FREE = a simple targeting bubble level: the dial + degrees + LEVEL state + calibrate. No setup.
+/// PRO unlocks the sun ring, ramp coaching (drive-up targets + honest can't-level maths) and audio
+/// levelling. Fixed layout: the dial never moves and every text zone is a constant-height slot, so
+/// nothing jumps as the tilt crosses thresholds.
 struct LevelScanView: View {
-    let config: VehicleConfig
+    /// nil for a free user, or a Pro user who hasn't set their van up yet. Only the Pro ramp/sun
+    /// features need it — the basic level works off the motion sensor alone.
+    let config: VehicleConfig?
 
     @Environment(MotionService.self) private var motion
     @Environment(LocationService.self) private var location
@@ -17,22 +20,27 @@ struct LevelScanView: View {
     @State private var armed = false
     @State private var showCalibrate = false
     @State private var showSetup = false
+    @State private var showPaywall = false
     @State private var wasLevel = false
 
     private let dialSize: CGFloat = 280
+    private let levelTolDeg = 0.45   // the bubble-level "close enough" band, sensor-only (config-free)
+
+    private var isPro: Bool { entitlements.isPro }
 
     // MARK: - Derived
 
-    private var plan: LevelPlan {
-        RampAdvisor.plan(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
-                         trackFrontMM: Double(config.trackFrontMM), trackRearMM: Double(config.trackRearMM),
-                         wheelbaseMM: Double(config.wheelbaseMM),
-                         stepsMM: config.activeStepsMM, tolerance: .comfort)
-    }
-    private var isLevel: Bool { plan.isLevel }
     private var degOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
-    private var maxStep: Int { config.activeStepsMM.max() ?? 0 }
-    private var neededMM: Int { plan.wheels.map { $0.liftMM }.max() ?? 0 }
+    private var isLevel: Bool { degOff < levelTolDeg }
+
+    /// Pro ramp plan — nil for free users or before the van is set up.
+    private var plan: LevelPlan? {
+        guard isPro, let config else { return nil }
+        return RampAdvisor.plan(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
+                                trackFrontMM: Double(config.trackFrontMM), trackRearMM: Double(config.trackRearMM),
+                                wheelbaseMM: Double(config.wheelbaseMM),
+                                stepsMM: config.activeStepsMM, tolerance: .comfort)
+    }
 
     private var eveningDate: Date { Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: Date()) ?? Date() }
     private var eveningSun: SunPosition? {
@@ -40,7 +48,7 @@ struct LevelScanView: View {
         return SolarPosition.at(latitude: lat, longitude: lon, date: eveningDate)
     }
     private var sunTarget: Double? {
-        guard let s = eveningSun, s.isUp else { return nil }
+        guard isPro, let config, let s = eveningSun, s.isUp else { return nil }
         return SolarPosition.vanHeadingForAwning(sunAzimuthDeg: s.azimuthDeg,
                                                  awningOffsetDeg: config.livingSide.awningOffsetDeg,
                                                  preference: sunPref)
@@ -58,7 +66,7 @@ struct LevelScanView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            noticeZone
+            if isPro { noticeZone }
             dial
             levelStatus
             Spacer(minLength: 0)
@@ -69,39 +77,62 @@ struct LevelScanView: View {
         .navigationTitle("Level")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { bottomBar }
-        .onAppear { motion.start(); audio.start(); location.requestAndStart() }
+        .onAppear {
+            motion.start()
+            if isPro { audio.start(); location.requestAndStart() }   // audio + sun are Pro-only
+        }
         .onDisappear { motion.stop(); audio.stop() }
         .onChange(of: isLevel) { _, nowLevel in
-            if nowLevel && !wasLevel && armed { Haptics.levelReached(); audio.alertLevel() }
+            if nowLevel && !wasLevel && armed && isPro { Haptics.levelReached(); audio.alertLevel() }
             wasLevel = nowLevel
         }
         .sheet(isPresented: $showCalibrate) { CalibrateView() }
+        .sheet(isPresented: $showPaywall) { PaywallSheet() }
         .navigationDestination(isPresented: $showSetup) { VehicleSetupView() }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { showSetup = true } label: {
-                    Image(systemName: "gearshape").accessibilityLabel("Setup")
+                Button { if isPro { showSetup = true } else { showPaywall = true } } label: {
+                    Image(systemName: "gearshape").accessibilityLabel(isPro ? "Setup" : "Unlock Pro")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) { calibrateButton }
-            ToolbarItem(placement: .topBarTrailing) { sunMenu }
+            if isPro {
+                ToolbarItem(placement: .topBarTrailing) { sunMenu }
+            }
             #if DEBUG
             ToolbarItem(placement: .topBarTrailing) { simulateMenu }
             #endif
         }
     }
 
-    // MARK: - Notice zone (fixed height — the coach line)
+    // MARK: - Notice zone (Pro only — fixed height coach line)
 
-    private var noticeZone: some View {
-        let n = notice
-        return HStack(alignment: .top, spacing: 10) {
+    @ViewBuilder private var noticeZone: some View {
+        if let config, let plan {
+            noticeCard(rampNotice(plan, config), tappable: false)
+        } else {
+            // Pro, but the van isn't set up yet — ramp coaching needs the dimensions.
+            Button { showSetup = true } label: {
+                noticeCard(("slider.horizontal.3", Theme.needsRamp, "Set up your van",
+                            "Add your wheelbase, track & ramps to get drive-up ramp coaching.", false),
+                           tappable: true)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func noticeCard(_ n: (icon: String, tint: Color, title: String, message: String, subtle: Bool),
+                            tappable: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: n.icon).font(.title3).foregroundStyle(n.tint)
             VStack(alignment: .leading, spacing: 3) {
                 Text(n.title).font(.callout.weight(.bold)).foregroundStyle(n.subtle ? Color(.label) : n.tint)
                 Text(n.message).font(.footnote).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+            if tappable {
+                Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+            }
         }
         .padding(14)
         .frame(height: 116, alignment: .topLeading)
@@ -110,14 +141,17 @@ struct LevelScanView: View {
                     in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private var notice: (icon: String, tint: Color, title: String, message: String, subtle: Bool) {
+    private func rampNotice(_ plan: LevelPlan, _ config: VehicleConfig)
+        -> (icon: String, tint: Color, title: String, message: String, subtle: Bool) {
+        let maxStep = config.activeStepsMM.max() ?? 0
+        let neededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
         if !plan.canLevel {
             return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "You'll never level here",
                     "Needs ~\(neededMM)mm but your ramps are \(maxStep)mm. Move to flatter ground, or add packing.", false)
         }
         if !armed {
             if isLevel {
-                return ("checkmark.circle.fill", Theme.levelGreen, "Already level", "You're good — park up, or save it below.", false)
+                return ("checkmark.circle.fill", Theme.levelGreen, "Already level", "You're good — park up.", false)
             }
             let wheels = plan.ramps.map { $0.wheelName }.joined(separator: " & ")
             let step = plan.ramps.map { $0.stepMM ?? 0 }.max() ?? 0
@@ -125,9 +159,10 @@ struct LevelScanView: View {
                     "Drop your ramps in front of those wheels, then tap Start.", false)
         }
         if isLevel {
-            return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it. Save this pitch below.", false)
+            return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it.", false)
         }
-        return ("waveform", Color(.secondaryLabel), "Drive up slowly", "Watch the dial — a chime tells you the moment you're level.", true)
+        return ("waveform", Color(.secondaryLabel), "Drive up slowly",
+                "Watch the dial — a chime tells you the moment you're level.", true)
     }
 
     // MARK: - The dial (nothing here changes SIZE; only colours/positions animate)
@@ -139,16 +174,18 @@ struct LevelScanView: View {
             Circle().fill(target.opacity(0.20)).frame(width: dialSize + 18, height: dialSize + 18).blur(radius: 9)
             Circle().fill(Color(red: 0.09, green: 0.09, blue: 0.11)).frame(width: dialSize, height: dialSize)
 
-            // Outer SUN ring — amber band (the sun)
-            Circle().stroke(Theme.sun.opacity(0.6), lineWidth: 2.5).frame(width: dialSize - 8, height: dialSize - 8)
+            // Sun layer — Pro only.
+            if isPro {
+                Circle().stroke(Theme.sun.opacity(0.6), lineWidth: 2.5).frame(width: dialSize - 8, height: dialSize - 8)
+                sunMarker
+            }
+
+            // Targeting scope — the free bubble level.
             Circle()
                 .stroke(target.opacity(0.4), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [1.5, 10]))
                 .frame(width: dialSize - 26, height: dialSize - 26)
-            ScopeTriangle().fill(sunAligned ? Theme.levelGreen : Theme.sun)   // NOSE marker (top)
+            ScopeTriangle().fill(target)   // NOSE marker (top)
                 .frame(width: 22, height: 17).offset(y: -(dialSize / 2) + 3)
-            sunMarker
-
-            // Inner LEVEL target — red targeting scope
             Circle().stroke(target.opacity(0.5), lineWidth: 1.5).frame(width: 122, height: 122)
             Circle().stroke(target.opacity(0.35), lineWidth: 1).frame(width: 66, height: 66)
             ScopeReticle().stroke(target.opacity(0.7), lineWidth: 1.3).frame(width: 140, height: 140)
@@ -209,11 +246,17 @@ struct LevelScanView: View {
         return parts.isEmpty ? "almost there" : parts.joined(separator: " · ")
     }
 
-    // MARK: - Bottom bar (Start → Save)
+    // MARK: - Bottom bar
 
     @ViewBuilder private var bottomBar: some View {
         Group {
-            if !armed {
+            if !isPro {
+                Button { showPaywall = true } label: {
+                    Label("Unlock Pro — ramps, sun & audio", systemImage: "lock.fill")
+                        .font(.headline).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(Theme.proBadge)
+            } else if !armed {
                 Button { armed = true; wasLevel = isLevel } label: {
                     Label("Start levelling", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)
                 }
@@ -262,6 +305,8 @@ struct LevelScanView: View {
             Button("Nose low 2.9°") { motion.simulate(rollDeg: 0.2, pitchDeg: -2.9) }
             Button("Left low 2.2°") { motion.simulate(rollDeg: -2.2, pitchDeg: 0) }
             Button("Way off (can't level)") { motion.simulate(rollDeg: 0.2, pitchDeg: -6) }
+            Divider()
+            Button("Toggle Pro (now: \(isPro ? "on" : "off"))") { entitlements.debugToggle() }
         }
     }
     #endif

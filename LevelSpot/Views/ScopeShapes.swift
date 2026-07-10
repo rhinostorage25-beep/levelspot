@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Shared "targeting-scope" primitives — used by the sun-planner compass (ArrivalView) and the
+// Shared "targeting-scope" primitives — used by the Level dial (LevelScanView) and the
 // AR camera-measure reticle (ARMeasureView) so the two instruments read as one set.
 
 /// The fixed targeting crosshair: four capped arms on the N/E/S/W axes, drawn around the centre.

@@ -34,12 +34,10 @@ struct RootView: View {
     @Query private var configs: [VehicleConfig]
 
     var body: some View {
+        // Always open to the Level dial. Free users need no setup at all; Pro users who haven't
+        // set their van up yet get a "Set up your van" prompt on the dial (config == nil here).
         NavigationStack {
-            if configs.isEmpty {
-                VehicleSetupView()
-            } else {
-                LevelScanView(config: configs[0])
-            }
+            LevelScanView(config: configs.first)
         }
     }
 }

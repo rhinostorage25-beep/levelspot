@@ -274,7 +274,7 @@ struct VehicleSetupView: View {
         guard let side = livingSide, let config = buildConfig(side: side) else { return }
         for old in existingConfigs { modelContext.delete(old) }
         modelContext.insert(config)
-        if !existingConfigs.isEmpty { dismiss() } // edit mode returns; first run switches via RootView
+        dismiss() // always pushed from the dial now — pop back to it
     }
 
     private func buildConfig(side: LivingSide) -> VehicleConfig? {
