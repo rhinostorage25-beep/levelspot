@@ -10,6 +10,10 @@ struct VehicleSetupView: View {
     private let ref = ReferenceStore.shared.data
 
     // Selection state (mirrors the design handoff's state model)
+    @State private var regInput = ""
+    @State private var regResultText: String?
+    @State private var regLookupFailed = false
+    @State private var lookupInFlight = false
     @State private var selectedPresetId: String?
     @State private var isManual = false
     @State private var manualWheelbase = ""
@@ -54,6 +58,14 @@ struct VehicleSetupView: View {
 
     var body: some View {
         List {
+            Section {
+                registrationCard
+            } header: {
+                Text("Look up by registration")
+            } footer: {
+                Text("This lookup service is occasionally unavailable — you can always choose your vehicle from the list below instead.")
+            }
+
             Section {
                 ForEach(ref.setupPresets) { preset in
                     presetRow(preset)
@@ -260,23 +272,41 @@ struct VehicleSetupView: View {
 
     private var manualFields: some View {
         Group {
-            LabeledContent("Wheelbase (mm)") {
-                HStack(spacing: 10) {
-                    TextField("e.g. 3400", text: $manualWheelbase)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                    cameraButton(.wheelbase)
-                }
-            }
-            LabeledContent("Track width (mm)") {
-                HStack(spacing: 10) {
-                    TextField("e.g. 1800", text: $manualTrack)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                    cameraButton(.track)
-                }
-            }
+            measureField(diagram: AnyView(WheelbaseDiagram()),
+                         label: "Wheelbase (mm)", placeholder: "e.g. 3400",
+                         text: $manualWheelbase, target: .wheelbase,
+                         hint: "Centre of the front tyre to centre of the rear tyre.")
+            measureField(diagram: AnyView(TrackDiagram()),
+                         label: "Track width (mm)", placeholder: "e.g. 1800",
+                         text: $manualTrack, target: .track,
+                         hint: "Centre to centre of the two front tyres, across the van.")
         }
+    }
+
+    /// One measurement: the hint diagram, a typed field, a "measure with camera" button, and the
+    /// centre-of-tyre reminder — the mistake being measuring edge-to-edge (reads short).
+    private func measureField(diagram: AnyView, label: String, placeholder: String,
+                              text: Binding<String>, target: MeasureTarget, hint: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            diagram
+                .frame(height: 78)
+                .frame(maxWidth: .infinity)
+                .accessibilityHidden(true)
+            LabeledContent(label) {
+                TextField(placeholder, text: text)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+            }
+            Button { activeMeasure = target } label: {
+                Label("Measure with camera", systemImage: "camera.viewfinder")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            Text(hint)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
     }
 
     private func wheelbasePicker(_ variants: [Int]) -> some View {
