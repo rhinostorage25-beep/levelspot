@@ -27,6 +27,7 @@ final class AudioCoach {
     // Live state, written by update(); read by the fixed-rate ticker so cadence never depends on
     // how often the sensor fires (rescheduling a timer every sensor frame would starve the beep).
     private var enabled = true
+    private var coaching = false   // only true once update() feeds live state — keeps the tick silent
     private var isLevelState = false
     private var beyondState = false
     private var offMM: Double = 0
@@ -109,6 +110,13 @@ final class AudioCoach {
         observers = tokens
     }
 
+    /// A single loud "you're LEVEL" alert — a rising triple chime. For the live dial, where the
+    /// engine's running: one unmistakable hit, not a stream of quiet beeps.
+    func alertLevel() {
+        guard started else { return }
+        schedule(levelBeep); schedule(levelBeep); schedule(levelBeep)
+    }
+
     /// Push the current scan state. `offMM` is how un-level the van is (corner spread);
     /// `toleranceMM` is the "level enough" band. Cheap to call every sensor frame.
     func update(offMM: Double, toleranceMM: Double, isLevel: Bool, beyond: Bool, enabled: Bool) {
@@ -117,10 +125,11 @@ final class AudioCoach {
         self.isLevelState = isLevel
         self.beyondState = beyond
         self.enabled = enabled
+        self.coaching = true
     }
 
     private func tick() {
-        guard started, enabled else { accum = 0; return }
+        guard started, coaching, enabled else { accum = 0; return }
         accum += Self.tickInterval
 
         if isLevelState {

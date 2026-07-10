@@ -73,6 +73,13 @@ final class MotionService: SensorSource {
         isCalibrated = true
     }
 
+    /// Undo a calibration (e.g. one saved on a slope by mistake) — back to the raw sensor.
+    func resetCalibration() {
+        defaults.removeObject(forKey: "calib.rollOffset")
+        defaults.removeObject(forKey: "calib.pitchOffset")
+        isCalibrated = false
+    }
+
     #if targetEnvironment(simulator) || DEBUG
     /// Drive the scan without hardware (simulator previews, demo walkthroughs).
     func simulate(rollDeg: Double, pitchDeg: Double) {
