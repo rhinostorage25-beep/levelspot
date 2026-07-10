@@ -26,7 +26,8 @@ final class EntitlementStore {
     /// - `false` → shows the FREE tier + paywall (what this build is for). Pro features stay
     ///            locked until the IAP product exists in App Store Connect.
     /// **MUST be `false` before the App Store submission** either way — see the memory note.
-    static let forceProForTesting = false
+    /// Currently `true` to test the Pro ramp coaching + inflatable per-wheel flow on TestFlight.
+    static let forceProForTesting = true
 
     private(set) var isPro = forceProForTesting
     private(set) var proProduct: Product?

@@ -88,6 +88,61 @@ public struct LevelPlan: Equatable, Sendable {
     }
 }
 
+/// The physical family of a levelling aid — it changes both the maths and the on-vehicle flow.
+public enum RampKind: String, Codable, Sendable, CaseIterable {
+    case stepped      // discrete shelves — drive up to a step (Milenco Quattro, Thule, Fiamma…)
+    case wedge        // smooth drive-on wedge — stop at any height (MGI Wedge)
+    case blocks       // stackable blocks — build height in per-block increments (Stacka, Lynx)
+    case inflatable   // air bag — inflate a wheel to an exact height (Flat-Jack, LocknLevel)
+    case ratchet      // screw/ratchet leveller — wind a wheel to an exact height (Milenco Aluminium)
+
+    public var isContinuous: Bool { self != .stepped }
+
+    /// Types set wheel-by-wheel (each corner independently) rather than driven up onto — these
+    /// use the guided per-wheel flow (pick a wheel → raise it to its target → next wheel).
+    public var isPerWheel: Bool {
+        switch self { case .blocks, .inflatable, .ratchet: return true; default: return false }
+    }
+}
+
+/// A concrete ramp's capability — what it can actually deliver. Stepped ramps carry their shelf
+/// set; continuous ramps carry a max lift (and, for blocks, the per-block increment).
+public struct RampSet: Equatable, Sendable {
+    public let kind: RampKind
+    public let stepsMM: [Int]       // ascending shelves (stepped only; empty for continuous)
+    public let maxLiftMM: Int       // continuous ceiling; for stepped == tallest shelf
+    public let incrementMM: Int     // 0 = smooth; ≈ block height for stackable blocks
+
+    public init(kind: RampKind, stepsMM: [Int], maxLiftMM: Int, incrementMM: Int) {
+        self.kind = kind
+        self.stepsMM = stepsMM.sorted()
+        self.maxLiftMM = maxLiftMM
+        self.incrementMM = incrementMM
+    }
+
+    public var isContinuous: Bool { kind.isContinuous }
+
+    /// The tallest lift this ramp can reach — decides whether a tilt is levellable.
+    public var ceilingMM: Int { kind == .stepped ? (stepsMM.max() ?? 0) : maxLiftMM }
+
+    /// Resolve a required lift to what THIS ramp actually delivers: snap to the nearest shelf
+    /// (stepped), round to the block increment (blocks), or take the exact figure clamped to the
+    /// ceiling (wedge / inflatable / ratchet). nil when no ramp is warranted / possible.
+    public func deliver(liftMM: Double, tolerance: Tolerance) -> Int? {
+        switch kind {
+        case .stepped:
+            return RampAdvisor.nearestStep(deficitMM: liftMM, stepsMM: stepsMM, tolerance: tolerance)
+        case .wedge, .inflatable, .ratchet:
+            let clamped = min(liftMM, Double(maxLiftMM))
+            return clamped >= 1 ? Int(clamped.rounded()) : nil
+        case .blocks:
+            let inc = Double(max(incrementMM, 1))
+            let clamped = min((liftMM / inc).rounded() * inc, Double(maxLiftMM))
+            return clamped >= inc / 2 ? Int(clamped.rounded()) : nil
+        }
+    }
+}
+
 public enum RampAdvisor {
     /// Default wedge slope: 4.3mm of rise per cm of run along the ramp. Used when the
     /// profile has no per-step placement data of its own (brand profiles can override later).
@@ -154,13 +209,26 @@ public enum RampAdvisor {
         )
     }
 
-    /// The whole-vehicle multi-ramp plan from one frozen reading. Each corner's required lift is
-    /// `highest corner − this corner`; the highest corner stays on the ground (0). The tilt is
-    /// levellable when the corner SPREAD fits under the tallest ramp — otherwise the lowest wheel
-    /// can't be raised enough and we say so (`canLevel == false`, with the shortfall).
+    /// Backwards-compatible stepped-ramp entry point (keeps existing call sites + test vectors).
     public static func plan(rollDeg: Double, pitchDeg: Double,
                             trackFrontMM: Double, trackRearMM: Double, wheelbaseMM: Double,
                             stepsMM: [Int], tolerance: Tolerance) -> LevelPlan {
+        plan(rollDeg: rollDeg, pitchDeg: pitchDeg,
+             trackFrontMM: trackFrontMM, trackRearMM: trackRearMM, wheelbaseMM: wheelbaseMM,
+             ramp: RampSet(kind: .stepped, stepsMM: stepsMM, maxLiftMM: stepsMM.max() ?? 0, incrementMM: 0),
+             tolerance: tolerance)
+    }
+
+    /// The whole-vehicle multi-ramp plan from one frozen reading, for ANY ramp type. Each corner's
+    /// required lift is `highest corner − this corner`; the highest corner stays on the ground (0).
+    /// Stepped ramps snap each lift to their nearest shelf; continuous ramps (wedge / blocks /
+    /// inflatable / ratchet) deliver the exact lift (rounded to the block increment where relevant),
+    /// so an air leveller gets a precise target instead of a step it doesn't have. The tilt is
+    /// levellable when the corner SPREAD fits under the ramp's ceiling — otherwise we say so
+    /// (`canLevel == false`, with the shortfall).
+    public static func plan(rollDeg: Double, pitchDeg: Double,
+                            trackFrontMM: Double, trackRearMM: Double, wheelbaseMM: Double,
+                            ramp: RampSet, tolerance: Tolerance) -> LevelPlan {
         let c = LevelMath.cornerHeights(rollDeg: rollDeg, pitchDeg: pitchDeg,
                                         trackFrontMM: trackFrontMM, trackRearMM: trackRearMM,
                                         wheelbaseMM: wheelbaseMM)
@@ -171,8 +239,9 @@ public enum RampAdvisor {
         let heights = corners.map { $0.2 }
         let maxH = heights.max() ?? 0
         let minH = heights.min() ?? 0
-        let tallest = stepsMM.max() ?? 0
-        let tolMM = Double(stepsMM.min() ?? 44) / 2 * tolerance.multiplier
+        let ceiling = ramp.ceilingMM
+        let baseTol = ramp.kind == .stepped ? Double(ramp.stepsMM.min() ?? 44) / 2 : 8
+        let tolMM = baseTol * tolerance.multiplier
 
         let wheels = corners.map { corner -> WheelRamp in
             let (end, side, h) = corner
@@ -180,7 +249,7 @@ public enum RampAdvisor {
             guard lift >= tolMM else {
                 return WheelRamp(end: end, side: side, liftMM: Int(lift.rounded()), stepMM: nil, placementCM: nil)
             }
-            let step = nearestStep(deficitMM: lift, stepsMM: stepsMM, tolerance: tolerance)
+            let step = ramp.deliver(liftMM: lift, tolerance: tolerance)
             return WheelRamp(end: end, side: side, liftMM: Int(lift.rounded()),
                              stepMM: step, placementCM: step.map(placementCM(forStepMM:)))
         }
@@ -189,8 +258,8 @@ public enum RampAdvisor {
         return LevelPlan(
             wheels: wheels,
             isLevel: !wheels.contains { $0.needsRamp },
-            canLevel: spread <= Double(tallest) + tolMM,
-            shortfallMM: max(0, Int((spread - Double(tallest)).rounded())),
+            canLevel: spread <= Double(ceiling) + tolMM,
+            shortfallMM: max(0, Int((spread - Double(ceiling)).rounded())),
             lowEnd: pitchDeg > 0 ? .rear : .front
         )
     }

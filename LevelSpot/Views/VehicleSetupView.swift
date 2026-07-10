@@ -216,7 +216,7 @@ struct VehicleSetupView: View {
                         Text(profile.name).foregroundStyle(.primary)
                         if profile.pro { ProPill() }
                     }
-                    Text(profile.stepsMm.map(String.init).joined(separator: " / ") + "mm")
+                    Text(profile.capacityLabel)
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -254,7 +254,7 @@ struct VehicleSetupView: View {
         if rampProfileId == "custom" {
             return customSteps.map(String.init).joined(separator: " / ") + "mm"
         }
-        return activeRampProfile.map { $0.stepsMm.map(String.init).joined(separator: " / ") + "mm" } ?? ""
+        return activeRampProfile.map { $0.capacityLabel } ?? ""
     }
 
     // MARK: - Continue

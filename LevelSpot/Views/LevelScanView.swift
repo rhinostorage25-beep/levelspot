@@ -21,6 +21,7 @@ struct LevelScanView: View {
     @State private var showCalibrate = false
     @State private var showSetup = false
     @State private var showPaywall = false
+    @State private var showInflateGuide = false
     @State private var wasLevel = false
 
     private let dialSize: CGFloat = 280
@@ -39,8 +40,11 @@ struct LevelScanView: View {
         return RampAdvisor.plan(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
                                 trackFrontMM: Double(config.trackFrontMM), trackRearMM: Double(config.trackRearMM),
                                 wheelbaseMM: Double(config.wheelbaseMM),
-                                stepsMM: config.activeStepsMM, tolerance: .comfort)
+                                ramp: config.activeRampSet, tolerance: .comfort)
     }
+
+    /// Ramps you set wheel-by-wheel (inflatables, blocks, ratchets) use the guided per-wheel flow.
+    private var usesPerWheelFlow: Bool { config?.activeRampSet.kind.isPerWheel ?? false }
 
     private var eveningDate: Date { Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: Date()) ?? Date() }
     private var eveningSun: SunPosition? {
@@ -88,6 +92,9 @@ struct LevelScanView: View {
         }
         .sheet(isPresented: $showCalibrate) { CalibrateView() }
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
+        .fullScreenCover(isPresented: $showInflateGuide) {
+            if let config { InflationGuideView(config: config) }
+        }
         .navigationDestination(isPresented: $showSetup) { VehicleSetupView() }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -143,23 +150,33 @@ struct LevelScanView: View {
 
     private func rampNotice(_ plan: LevelPlan, _ config: VehicleConfig)
         -> (icon: String, tint: Color, title: String, message: String, subtle: Bool) {
-        let maxStep = config.activeStepsMM.max() ?? 0
+        let ceiling = config.activeRampSet.ceilingMM
         let neededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
         if !plan.canLevel {
             return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "You'll never level here",
-                    "Needs ~\(neededMM)mm but your ramps are \(maxStep)mm. Move to flatter ground, or add packing.", false)
+                    "Needs ~\(neededMM)mm but your ramps reach \(ceiling)mm. Move to flatter ground, or add packing.", false)
         }
+        if isLevel {
+            return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it.", false)
+        }
+        // Wheel-by-wheel aids (inflatables / blocks / ratchets): place, then start the guided flow.
+        if usesPerWheelFlow {
+            let noun: String = {
+                switch config.activeRampSet.kind {
+                case .inflatable: return "air bags"
+                case .blocks: return "blocks"
+                default: return "levellers"
+                }
+            }()
+            return ("arrow.up.circle.fill", Theme.needsRamp, "Ready when you are",
+                    "Put your \(noun) under the low wheels, then tap Level wheel by wheel.", false)
+        }
+        // Drive-up ramps (stepped / wedge).
         if !armed {
-            if isLevel {
-                return ("checkmark.circle.fill", Theme.levelGreen, "Already level", "You're good — park up.", false)
-            }
             let wheels = plan.ramps.map { $0.wheelName }.joined(separator: " & ")
             let step = plan.ramps.map { $0.stepMM ?? 0 }.max() ?? 0
             return ("arrow.up.circle.fill", Theme.needsRamp, "Ramp \(wheels) · ~\(step)mm",
                     "Drop your ramps in front of those wheels, then tap Start.", false)
-        }
-        if isLevel {
-            return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it.", false)
         }
         return ("waveform", Color(.secondaryLabel), "Drive up slowly",
                 "Watch the dial — a chime tells you the moment you're level.", true)
@@ -256,6 +273,11 @@ struct LevelScanView: View {
                         .font(.headline).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).tint(Theme.proBadge)
+            } else if usesPerWheelFlow {
+                Button { showInflateGuide = true } label: {
+                    Label("Level wheel by wheel", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             } else if !armed {
                 Button { armed = true; wasLevel = isLevel } label: {
                     Label("Start levelling", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)

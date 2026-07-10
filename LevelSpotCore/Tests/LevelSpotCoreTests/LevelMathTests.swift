@@ -143,4 +143,24 @@ final class LevelMathTests: XCTestCase {
         XCTAssertEqual(plan.ramps.count, 3)
         XCTAssertEqual(Set(plan.ramps.map(\.wheelName)), ["Front Left", "Rear Left", "Rear Right"])
     }
+
+    // P5: a continuous inflatable levels the SAME 5° roll P3 couldn't (200mm ceiling > 157mm spread)
+    // and delivers the EXACT lift, not a snapped step.
+    func testP5InflatableLevelsBeyondSteppedRange() {
+        let air = RampSet(kind: .inflatable, stepsMM: [], maxLiftMM: 200, incrementMM: 0)
+        let plan = RampAdvisor.plan(rollDeg: 5, pitchDeg: 0, trackFrontMM: 1790, trackRearMM: 1790,
+                                    wheelbaseMM: 3450, ramp: air, tolerance: .comfort)
+        XCTAssertTrue(plan.canLevel)
+        XCTAssertEqual(plan.ramps.count, 2)
+        XCTAssertTrue(plan.ramps.allSatisfy { $0.stepMM == $0.liftMM })   // exact, not snapped to a shelf
+    }
+
+    // P6: stackable blocks round each wheel's target to the block increment (40mm here).
+    func testP6BlocksRoundToIncrement() {
+        let blocks = RampSet(kind: .blocks, stepsMM: [], maxLiftMM: 200, incrementMM: 40)
+        let plan = RampAdvisor.plan(rollDeg: 5, pitchDeg: 0, trackFrontMM: 1790, trackRearMM: 1790,
+                                    wheelbaseMM: 3450, ramp: blocks, tolerance: .comfort)
+        XCTAssertTrue(plan.canLevel)
+        XCTAssertTrue(plan.ramps.allSatisfy { ($0.stepMM ?? 0) % 40 == 0 })
+    }
 }

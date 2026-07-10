@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import LevelSpotCore
 
 // "Nearside" and "offside" are banned terms anywhere in this codebase — they flip meaning
 // between left- and right-hand-drive markets and would silently invert recommendations for
@@ -75,10 +76,21 @@ final class VehicleConfig {
         self.updatedAt = .now
     }
 
-    /// Ascending step heights for the active ramp profile.
+    /// Ascending step heights for the active ramp profile (stepped ramps only — kept for the
+    /// custom-steps editor and any stepped-specific display).
     var activeStepsMM: [Int] {
         if rampProfileId == "custom" { return customStepsMM.filter { $0 > 0 }.sorted() }
         return ReferenceStore.shared.rampProfile(id: rampProfileId)?.stepsMm.sorted() ?? [44, 78, 112]
+    }
+
+    /// The full ramp capability (type + heights) driving the levelling maths and the on-vehicle flow.
+    var activeRampSet: RampSet {
+        if rampProfileId == "custom" {
+            let s = customStepsMM.filter { $0 > 0 }.sorted()
+            return RampSet(kind: .stepped, stepsMM: s, maxLiftMM: s.max() ?? 0, incrementMM: 0)
+        }
+        return ReferenceStore.shared.rampProfile(id: rampProfileId)?.rampSet
+            ?? RampSet(kind: .stepped, stepsMM: [44, 78, 112], maxLiftMM: 112, incrementMM: 0)
     }
 }
 
