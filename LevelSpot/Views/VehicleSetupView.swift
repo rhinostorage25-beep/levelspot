@@ -21,7 +21,6 @@ struct VehicleSetupView: View {
     @State private var customSteps = [40, 70, 100]
     @State private var livingSide: LivingSide?
     @State private var showPaywall = false
-    @State private var showPairing = false
     @State private var showShop = false
     @State private var activeMeasure: MeasureTarget?
 
@@ -43,17 +42,17 @@ struct VehicleSetupView: View {
     var body: some View {
         List {
             Section {
-                measureField(diagram: AnyView(WheelbaseDiagram()),
+                measureField(diagram: AnyView(VanPhoto("VanSide", fallback: AnyView(WheelbaseDiagram()))),
                              label: "Wheelbase (mm)", placeholder: "e.g. 3400",
                              text: $wheelbase, target: .wheelbase,
                              hint: "Centre of the front tyre to centre of the rear tyre.")
-                measureField(diagram: AnyView(TrackDiagram()),
+                measureField(diagram: AnyView(VanPhoto("VanFront", fallback: AnyView(TrackDiagram()))),
                              label: "Track width (mm)", placeholder: "e.g. 1800",
                              text: $trackFront, target: .trackFront,
                              hint: "Centre to centre of the two FRONT tyres, across the van.")
                 Toggle("Rear track is different", isOn: $rearDiffers.animation())
                 if rearDiffers {
-                    measureField(diagram: AnyView(TrackDiagram()),
+                    measureField(diagram: AnyView(VanPhoto("VanFront", fallback: AnyView(TrackDiagram()))),
                                  label: "Rear track (mm)", placeholder: "e.g. 1980",
                                  text: $trackRear, target: .trackRear,
                                  hint: "Centre to centre of the two REAR tyres — wider on some chassis.")
@@ -89,30 +88,6 @@ struct VehicleSetupView: View {
             }
 
             Section {
-                Button {
-                    showPairing = true
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "iphone.gen1.radiowaves.left.and.right")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Spare-Device Sensor").foregroundStyle(.primary)
-                            Text(existingConfigs.first?.spareDeviceName.map { "Paired · \($0)" } ?? "Not set up")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .buttonStyle(.plain)
-            } footer: {
-                Text("LevelSpot works fully offline, no account needed. Sign in only to sync your pitch history across your own devices.")
-            }
-
-            Section {
                 Button(action: continueTapped) {
                     Text("Continue")
                         .frame(maxWidth: .infinity)
@@ -128,7 +103,6 @@ struct VehicleSetupView: View {
         .navigationTitle("Set up")
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
         .sheet(isPresented: $showShop) { RampShopSheet(neededMM: nil) }
-        .navigationDestination(isPresented: $showPairing) { PairingView() }
         .fullScreenCover(item: $activeMeasure) { target in
             ARMeasureView(kind: target.kind) { mm in applyMeasurement(target, mm) }
         }
@@ -143,7 +117,7 @@ struct VehicleSetupView: View {
                               text: Binding<String>, target: MeasureTarget, hint: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             diagram
-                .frame(height: 78)
+                .frame(height: 116)
                 .frame(maxWidth: .infinity)
                 .accessibilityHidden(true)
             LabeledContent(label) {

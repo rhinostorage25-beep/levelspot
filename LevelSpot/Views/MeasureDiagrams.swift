@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Hint diagrams
 //
@@ -147,6 +148,27 @@ struct PhoneFlatDiagram: View {
             arr.move(to: CGPoint(x: w * 0.44, y: ay)); arr.addLine(to: CGPoint(x: w * 0.60, y: ay))
             ctx.stroke(arr, with: .color(tint), lineWidth: 1.6)
             arrowhead(ctx, at: CGPoint(x: w * 0.60, y: ay), pointingLeft: true, color: tint)
+        }
+    }
+}
+
+/// Shows a bundled van illustration (the clean drawings in Assets.xcassets: VanSide / VanFront) for
+/// the measure hints. Falls back to the line-art diagram until the PNG is dropped into the imageset,
+/// so the screen is never blank.
+struct VanPhoto: View {
+    let asset: String
+    let fallback: AnyView
+
+    init(_ asset: String, fallback: AnyView) {
+        self.asset = asset
+        self.fallback = fallback
+    }
+
+    var body: some View {
+        if UIImage(named: asset) != nil {
+            Image(asset).resizable().scaledToFit()
+        } else {
+            fallback
         }
     }
 }
