@@ -10,10 +10,6 @@ struct VehicleSetupView: View {
     private let ref = ReferenceStore.shared.data
 
     // Selection state (mirrors the design handoff's state model)
-    @State private var regInput = ""
-    @State private var regResultText: String?
-    @State private var regLookupFailed = false
-    @State private var lookupInFlight = false
     @State private var selectedPresetId: String?
     @State private var isManual = false
     @State private var manualWheelbase = ""
@@ -58,14 +54,6 @@ struct VehicleSetupView: View {
 
     var body: some View {
         List {
-            Section {
-                registrationCard
-            } header: {
-                Text("Look up by registration")
-            } footer: {
-                Text("This lookup service is occasionally unavailable — you can always choose your vehicle from the list below instead.")
-            }
-
             Section {
                 ForEach(ref.setupPresets) { preset in
                     presetRow(preset)

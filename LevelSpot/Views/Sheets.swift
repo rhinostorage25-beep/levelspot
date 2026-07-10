@@ -2,7 +2,8 @@ import SwiftUI
 import SwiftData
 import LevelSpotCore
 
-/// Save = one tap plus a star rating. A private note to self, never shared content.
+/// Save = name it and tap Save. Rating + sun/view are optional extras, tucked away so the common
+/// case is one field and one button. A private note to self, never shared content.
 struct SavePitchSheet: View {
     let config: VehicleConfig
     let corners: CornerHeights
@@ -18,38 +19,47 @@ struct SavePitchSheet: View {
     @State private var siteName = ""
     @State private var capturedSun: Int?
     @State private var capturedView: Int?
+    @State private var showExtras = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 22) {
-                HStack(spacing: 10) {
-                    ForEach(1...5, id: \.self) { star in
-                        Button {
-                            rating = star
-                        } label: {
-                            Image(systemName: "star.fill")
-                                .font(.title)
-                                .foregroundStyle(star <= rating ? Theme.proBadge : Color(.tertiaryLabel))
-                        }
-                        .accessibilityLabel("Rate \(star) star\(star == 1 ? "" : "s")")
-                    }
-                }
-                .padding(.top, 16)
-
-                TextField("Site name (optional)", text: $siteName)
+            VStack(spacing: 18) {
+                TextField("Name this spot (optional)", text: $siteName)
                     .textFieldStyle(.roundedBorder)
                     .padding(.horizontal)
+                    .padding(.top, 20)
 
-                Text("Just a private note to yourself for next time — nothing here is shared or visible to anyone else.")
+                Text("A private note to yourself for next time — nothing here is shared.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
+                DisclosureGroup("Add a rating\(entitlements.isPro ? ", sun & view" : "")", isExpanded: $showExtras) {
+                    VStack(spacing: 16) {
+                        HStack(spacing: 10) {
+                            ForEach(1...5, id: \.self) { star in
+                                Button {
+                                    rating = (rating == star) ? 0 : star
+                                } label: {
+                                    Image(systemName: star <= rating ? "star.fill" : "star")
+                                        .font(.title2)
+                                        .foregroundStyle(star <= rating ? Theme.proBadge : Color(.tertiaryLabel))
+                                }
+                                .accessibilityLabel("Rate \(star) star\(star == 1 ? "" : "s")")
+                            }
+                        }
+                        .padding(.top, 4)
+                        if entitlements.isPro { proHeadingCapture }
+                    }
+                    .padding(.top, 8)
+                }
+                .padding(.horizontal)
+
                 if !connectivity.isOnline {
                     HStack(spacing: 8) {
                         Image(systemName: "wifi.slash").foregroundStyle(.secondary)
-                        Text("No signal — saved on this phone; will sync to your other devices once you're back online and signed in.")
+                        Text("No signal — saved on this phone; will sync once you're back online and signed in.")
                             .font(.caption)
                     }
                     .padding(12)
@@ -62,13 +72,9 @@ struct SavePitchSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                if entitlements.isPro {
-                    proHeadingCapture
-                }
                 Spacer()
             }
-            .navigationTitle("Rate This Pitch")
+            .navigationTitle("Save this spot")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -76,7 +82,7 @@ struct SavePitchSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save)
-                        .disabled(rating == 0 || location.latitude == nil)
+                        .disabled(location.latitude == nil)
                 }
             }
         }

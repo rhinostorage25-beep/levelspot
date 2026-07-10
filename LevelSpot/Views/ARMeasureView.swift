@@ -58,17 +58,31 @@ struct ARMeasureView: View {
 
     private var controls: some View {
         VStack {
-            Text(model.phase == .done
-                 ? "Happy with it? Use the figure, or redo."
-                 : kind.instruction(placingFirst: model.phase == .first))
-                .font(.callout.weight(.medium))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.white)
-                .padding(12)
-                .frame(maxWidth: .infinity)
-                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
-                .padding(.horizontal)
-                .padding(.top, 8)
+            VStack(spacing: 8) {
+                // The hint diagram — reinforces that both figures are measured tyre-centre to
+                // tyre-centre (the mistake is measuring edge-to-edge, which reads short).
+                Group {
+                    if kind == .wheelbase {
+                        WheelbaseDiagram(line: .white, tint: .yellow)
+                    } else {
+                        TrackDiagram(line: .white, tint: .yellow)
+                    }
+                }
+                .frame(height: 62)
+                .accessibilityHidden(true)
+
+                Text(model.phase == .done
+                     ? "Happy with it? Use the figure, or redo."
+                     : kind.instruction(placingFirst: model.phase == .first))
+                    .font(.callout.weight(.medium))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal)
+            .padding(.top, 8)
 
             Spacer()
 

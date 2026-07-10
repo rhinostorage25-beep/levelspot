@@ -1,10 +1,10 @@
 import SwiftUI
 import LevelSpotCore
 
-/// The one screen. A big dial you glance at from the driver's seat while you drive up your ramps:
-/// OUTER ring = sun (park facing the right way), INNER bubble = level (drive up till it centres).
-/// A loud alert when level, and an upfront "you'll never level here" pop-up when the tilt beats
-/// your ramps. Calibration lives behind a guarded menu so a stray tap can't corrupt it.
+/// The one screen — a guided level. FIXED layout: the dial never moves and every text zone is a
+/// constant-height slot whose content swaps but whose size never changes, so nothing jumps as the
+/// tilt crosses thresholds. A coach line + one button walk you through: Start → drive up → level.
+/// The "you're level" alert only arms after you tap Start, so it doesn't chime while you handle it.
 struct LevelScanView: View {
     let config: VehicleConfig
 
@@ -14,11 +14,12 @@ struct LevelScanView: View {
 
     @State private var audio = AudioCoach()
     @State private var sunPref: SunPreference = .sun
+    @State private var armed = false
     @State private var showSaveSheet = false
-    @State private var showCalibrateConfirm = false
+    @State private var showCalibrate = false
     @State private var wasLevel = false
 
-    private let dialSize: CGFloat = 300
+    private let dialSize: CGFloat = 280
 
     // MARK: - Derived
 
@@ -33,7 +34,6 @@ struct LevelScanView: View {
     private var maxStep: Int { config.activeStepsMM.max() ?? 0 }
     private var neededMM: Int { plan.wheels.map { $0.liftMM }.max() ?? 0 }
 
-    // Sun (evening) target relative to where the nose currently points.
     private var eveningDate: Date { Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: Date()) ?? Date() }
     private var eveningSun: SunPosition? {
         guard let lat = location.latitude, let lon = location.longitude else { return nil }
@@ -54,24 +54,21 @@ struct LevelScanView: View {
     }
     private var sunAligned: Bool { sunRel.map { abs($0) < 10 } ?? false }
 
-    // MARK: - Body
+    // MARK: - Body (fixed layout — nothing here changes size as you tilt)
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                if !plan.canLevel { cantLevelBanner }
-                dial
-                levelStatus
-                sunStatus
-                if !isLevel && plan.canLevel { rampHint }
-                sunToggle
-            }
-            .padding()
+        VStack(spacing: 14) {
+            noticeZone
+            dial
+            levelStatus
+            Spacer(minLength: 0)
         }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Level")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) { saveBar }
+        .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(isPresented: $showSaveSheet) {
             SavePitchSheet(config: config,
                            corners: LevelMath.cornerHeights(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
@@ -83,35 +80,59 @@ struct LevelScanView: View {
         .onAppear { motion.start(); audio.start(); location.requestAndStart() }
         .onDisappear { motion.stop(); audio.stop() }
         .onChange(of: isLevel) { _, nowLevel in
-            if nowLevel && !wasLevel { Haptics.levelReached(); audio.alertLevel() }
+            if nowLevel && !wasLevel && armed { Haptics.levelReached(); audio.alertLevel() }
             wasLevel = nowLevel
         }
+        .sheet(isPresented: $showCalibrate) { CalibrateView() }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("Calibrate — I'm on flat ground") { showCalibrateConfirm = true }
-                    if motion.isCalibrated {
-                        Button("Reset calibration", role: .destructive) { motion.resetCalibration() }
-                    }
-                } label: {
-                    Image(systemName: motion.isCalibrated ? "scope" : "exclamationmark.triangle")
-                }
-            }
+            ToolbarItem(placement: .topBarTrailing) { calibrateButton }
+            ToolbarItem(placement: .topBarTrailing) { sunMenu }
             #if DEBUG
             ToolbarItem(placement: .topBarLeading) { simulateMenu }
             #endif
         }
-        .alert("Set level here?", isPresented: $showCalibrateConfirm) {
-            Button("Set level") { motion.calibrateHere(); Haptics.saved() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(degOff > 8
-                 ? "This spot reads \(String(format: "%.0f", degOff))° off — that doesn't look flat. Only calibrate here if you're certain it's level."
-                 : "Only on ground you KNOW is flat. It zeroes the phone/mount tilt.")
-        }
     }
 
-    // MARK: - The dial
+    // MARK: - Notice zone (fixed height — the coach line)
+
+    private var noticeZone: some View {
+        let n = notice
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: n.icon).font(.title3).foregroundStyle(n.tint)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(n.title).font(.callout.weight(.bold)).foregroundStyle(n.subtle ? Color(.label) : n.tint)
+                Text(n.message).font(.footnote).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(height: 116, alignment: .topLeading)
+        .frame(maxWidth: .infinity)
+        .background(n.subtle ? Color(.secondarySystemGroupedBackground) : n.tint.opacity(0.14),
+                    in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var notice: (icon: String, tint: Color, title: String, message: String, subtle: Bool) {
+        if !plan.canLevel {
+            return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "You'll never level here",
+                    "Needs ~\(neededMM)mm but your ramps are \(maxStep)mm. Move to flatter ground, or add packing.", false)
+        }
+        if !armed {
+            if isLevel {
+                return ("checkmark.circle.fill", Theme.levelGreen, "Already level", "You're good — park up, or save it below.", false)
+            }
+            let wheels = plan.ramps.map { $0.wheelName }.joined(separator: " & ")
+            let step = plan.ramps.map { $0.stepMM ?? 0 }.max() ?? 0
+            return ("arrow.up.circle.fill", Theme.needsRamp, "Ramp \(wheels) · ~\(step)mm",
+                    "Drop your ramps in front of those wheels, then tap Start.", false)
+        }
+        if isLevel {
+            return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it. Save this pitch below.", false)
+        }
+        return ("waveform", Color(.secondaryLabel), "Drive up slowly", "Watch the dial — a chime tells you the moment you're level.", true)
+    }
+
+    // MARK: - The dial (nothing here changes SIZE; only colours/positions animate)
 
     private var dial: some View {
         let spyRed = Color(red: 0.98, green: 0.16, blue: 0.22)
@@ -122,7 +143,6 @@ struct LevelScanView: View {
 
             // Outer SUN ring — amber band (the sun)
             Circle().stroke(Theme.sun.opacity(0.6), lineWidth: 2.5).frame(width: dialSize - 8, height: dialSize - 8)
-            // Red targeting tick ring
             Circle()
                 .stroke(target.opacity(0.4), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [1.5, 10]))
                 .frame(width: dialSize - 26, height: dialSize - 26)
@@ -131,14 +151,13 @@ struct LevelScanView: View {
             sunMarker
 
             // Inner LEVEL target — red targeting scope
-            Circle().stroke(target.opacity(0.5), lineWidth: 1.5).frame(width: 132, height: 132)
-            Circle().stroke(target.opacity(0.35), lineWidth: 1).frame(width: 70, height: 70)
-            ScopeReticle().stroke(target.opacity(0.7), lineWidth: 1.3).frame(width: 150, height: 150)
+            Circle().stroke(target.opacity(0.5), lineWidth: 1.5).frame(width: 122, height: 122)
+            Circle().stroke(target.opacity(0.35), lineWidth: 1).frame(width: 66, height: 66)
+            ScopeReticle().stroke(target.opacity(0.7), lineWidth: 1.3).frame(width: 140, height: 140)
 
-            // The bubble — floats toward the HIGH side (like a spirit level); centre = level.
             Circle()
                 .fill(target)
-                .frame(width: 38, height: 38)
+                .frame(width: 36, height: 36)
                 .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 2))
                 .shadow(color: target.opacity(0.9), radius: 9)
                 .offset(x: bubbleOffset.width, y: bubbleOffset.height)
@@ -149,10 +168,10 @@ struct LevelScanView: View {
     }
 
     private var bubbleOffset: CGSize {
-        let scale: CGFloat = 16
-        let cap: CGFloat = 52
-        let x = min(max(CGFloat(-motion.rollDeg) * scale, -cap), cap)      // left high → bubble left
-        let y = min(max(CGFloat(-motion.pitchDeg) * scale, -cap), cap)     // nose high → bubble up
+        let scale: CGFloat = 15
+        let cap: CGFloat = 48
+        let x = min(max(CGFloat(-motion.rollDeg) * scale, -cap), cap)
+        let y = min(max(CGFloat(-motion.pitchDeg) * scale, -cap), cap)
         return CGSize(width: x, height: y)
     }
 
@@ -160,10 +179,10 @@ struct LevelScanView: View {
         if let rel = sunRel {
             ZStack {
                 Image(systemName: "sun.max.fill")
-                    .font(.system(size: 34))
+                    .font(.system(size: 32))
                     .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
                     .shadow(color: (sunAligned ? Theme.levelGreen : Theme.sun).opacity(0.9), radius: 7)
-                    .offset(y: -(dialSize / 2) + 30)
+                    .offset(y: -(dialSize / 2) + 28)
             }
             .frame(width: dialSize, height: dialSize)
             .rotationEffect(.degrees(rel))
@@ -171,17 +190,18 @@ struct LevelScanView: View {
         }
     }
 
-    // MARK: - Status + hints
+    // MARK: - Level status (fixed height)
 
     private var levelStatus: some View {
         VStack(spacing: 4) {
             Text(isLevel ? "LEVEL" : String(format: "%.1f° off", degOff))
-                .font(.system(size: 44, weight: .heavy, design: .rounded))
+                .font(.system(size: 46, weight: .heavy, design: .rounded))
                 .foregroundStyle(isLevel ? Theme.levelGreen : Color(.label))
                 .contentTransition(.numericText())
             Text(isLevel ? "Stop — handbrake on." : levelDirection)
                 .font(.subheadline).foregroundStyle(.secondary)
         }
+        .frame(height: 92)
     }
 
     private var levelDirection: String {
@@ -191,68 +211,50 @@ struct LevelScanView: View {
         return parts.isEmpty ? "almost there" : parts.joined(separator: " · ")
     }
 
-    @ViewBuilder private var sunStatus: some View {
-        if let _ = sunRel {
-            HStack(spacing: 8) {
-                Image(systemName: "sun.max.fill").foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
-                Text(sunAligned
-                     ? "Facing right for evening \(sunPref == .sun ? "sun" : "shade")."
-                     : "Turn the van until the sun marker reaches the nose.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
+    // MARK: - Bottom bar (Start → Save)
+
+    @ViewBuilder private var bottomBar: some View {
+        Group {
+            if !armed {
+                Button { armed = true; wasLevel = isLevel } label: {
+                    Label("Start levelling", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                HStack(spacing: 12) {
+                    Button("Stop") { armed = false }
+                        .buttonStyle(.bordered)
+                    Button(isLevel ? "Save this pitch" : "Save anyway") { showSaveSheet = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(isLevel ? Theme.levelGreen : Color.accentColor)
+                }
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
         }
-    }
-
-    private var rampHint: some View {
-        let wheels = plan.ramps.map { $0.wheelName }.joined(separator: " & ")
-        let step = plan.ramps.map { $0.stepMM ?? 0 }.max() ?? 0
-        return HStack(spacing: 8) {
-            Image(systemName: "arrow.up.circle.fill").foregroundStyle(Theme.needsRamp)
-            Text("Ramp \(wheels) · ~\(step)mm")
-                .font(.subheadline.weight(.medium))
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var cantLevelBanner: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.needsBigRamp)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("You'll never level here").font(.callout.weight(.bold)).foregroundStyle(Theme.needsBigRamp)
-                Text("Needs ~\(neededMM)mm but your ramps are \(maxStep)mm. Move to flatter ground, or add packing under the ramps.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.needsBigRamp.opacity(0.14), in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private var sunToggle: some View {
-        Picker("", selection: $sunPref) {
-            Text("Chase sun").tag(SunPreference.sun)
-            Text("Find shade").tag(SunPreference.shade)
-        }
-        .pickerStyle(.segmented)
-    }
-
-    private var saveBar: some View {
-        Button { showSaveSheet = true } label: {
-            Text(isLevel ? "Save this pitch" : "Save anyway").font(.headline).frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(isLevel ? Theme.levelGreen : Color.accentColor)
         .controlSize(.large)
+        .frame(maxWidth: .infinity)
         .padding()
         .background(.bar)
+    }
+
+    // MARK: - Toolbar menus
+
+    private var calibrateButton: some View {
+        Button { showCalibrate = true } label: {
+            Image(systemName: motion.isCalibrated ? "scope" : "exclamationmark.triangle")
+        }
+    }
+
+    private var sunMenu: some View {
+        Menu {
+            Button { sunPref = .sun } label: {
+                Label("Chase sun", systemImage: sunPref == .sun ? "checkmark" : "sun.max")
+            }
+            Button { sunPref = .shade } label: {
+                Label("Find shade", systemImage: sunPref == .shade ? "checkmark" : "cloud.sun")
+            }
+        } label: {
+            Image(systemName: "sun.max")
+        }
     }
 
     #if DEBUG
