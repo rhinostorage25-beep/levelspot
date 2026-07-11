@@ -224,7 +224,8 @@ struct LevelScanView: View {
 
             // Sun layer — Pro, opt-in only. Amber (never green — that read as "why is it green?").
             if isPro && sunOn {
-                Circle().stroke(Theme.sun.opacity(0.6), lineWidth: 2.5).frame(width: dialSize - 8, height: dialSize - 8)
+                Circle().stroke((sunAligned ? Theme.levelGreen : Theme.sun).opacity(0.6), lineWidth: 2.5)
+                    .frame(width: dialSize - 8, height: dialSize - 8)
                 sunMarker
             }
 
@@ -253,9 +254,9 @@ struct LevelScanView: View {
     /// Opt-in sun hint — shown BELOW the dial (not overlapping it) only when the sun planner is on.
     @ViewBuilder private var sunHint: some View {
         if isPro && sunOn {
-            Text("Turn the van until ☀ reaches the top")
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(Theme.sun)
+            Text(sunAligned ? "☀ Facing the sun — good spot" : "Turn the van until ☀ reaches the top")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .background(.ultraThinMaterial, in: Capsule())
         }
@@ -272,10 +273,12 @@ struct LevelScanView: View {
     @ViewBuilder private var sunMarker: some View {
         if let rel = sunRel {
             ZStack {
-                Image(systemName: "sun.max.fill")
-                    .font(.system(size: 30))
-                    .foregroundStyle(Theme.sun)   // always amber — green here read as "why is it green?"
-                    .shadow(color: Theme.sun.opacity(0.9), radius: 7)
+                // Amber while you're hunting; GREEN the moment it docks at the nose = "you're now
+                // facing the sun." The green is the whole payoff — the caption below explains it.
+                Image(systemName: sunAligned ? "sun.max.fill" : "sun.max.fill")
+                    .font(.system(size: sunAligned ? 34 : 30))
+                    .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
+                    .shadow(color: (sunAligned ? Theme.levelGreen : Theme.sun).opacity(0.95), radius: sunAligned ? 10 : 7)
                     .offset(y: -(dialSize / 2) + 28)
             }
             .frame(width: dialSize, height: dialSize)
