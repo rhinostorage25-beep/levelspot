@@ -313,23 +313,25 @@ struct SideDiagram: View {
             VStack(spacing: 4) {
                 edgeLabel(.front)
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color(.tertiaryLabel), lineWidth: 1.6)
-                        .frame(width: 76, height: 132)
+                    // Same top-view van image as the Level dial (front pointing up).
+                    Image("VanTop")
+                        .resizable().scaledToFit()
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 86, height: 140)
                     VStack {
                         bar(.front, horizontal: true)
                         Spacer()
                         bar(.rear, horizontal: true)
                     }
-                    .padding(6)
+                    .padding(4)
                     HStack {
                         bar(.passenger, horizontal: false)
                         Spacer()
                         bar(.driver, horizontal: false)
                     }
-                    .padding(6)
+                    .padding(4)
                 }
-                .frame(width: 96, height: 148)
+                .frame(width: 96, height: 150)
                 edgeLabel(.rear)
             }
             edgeLabel(.driver).rotationEffect(.degrees(90)).fixedSize()

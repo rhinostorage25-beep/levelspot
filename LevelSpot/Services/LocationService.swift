@@ -16,6 +16,7 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.headingFilter = kCLHeadingFilterNone   // report every change so the sun tracks smoothly as you turn
     }
 
     func requestAndStart() {
