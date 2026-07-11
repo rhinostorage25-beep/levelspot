@@ -59,17 +59,15 @@ struct ARMeasureView: View {
     private var controls: some View {
         VStack {
             VStack(spacing: 8) {
-                // The hint diagram — reinforces that both figures are measured tyre-centre to
-                // tyre-centre (the mistake is measuring edge-to-edge, which reads short).
-                Group {
-                    if kind == .wheelbase {
-                        WheelbaseDiagram(line: .white, tint: .yellow)
-                    } else {
-                        TrackDiagram(line: .white, tint: .yellow)
-                    }
-                }
-                .frame(height: 62)
-                .accessibilityHidden(true)
+                // The hint diagram — the same annotated van image (red caliper on the tyre centres)
+                // as Setup, so it's clear you measure tyre-centre to tyre-centre, not edge-to-edge.
+                Image(kind == .wheelbase ? "VanSide" : "VanFront")
+                    .resizable().scaledToFit()
+                    .frame(height: 78)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .accessibilityHidden(true)
 
                 Text(model.phase == .done
                      ? "Happy with it? Use the figure, or redo."
