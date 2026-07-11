@@ -313,11 +313,14 @@ struct SideDiagram: View {
             VStack(spacing: 4) {
                 edgeLabel(.front)
                 ZStack {
-                    // Same top-view van image as the Level dial (front pointing up).
+                    // Same top-view van image as the Level dial (front pointing up). Size it big in
+                    // its own landscape orientation FIRST, then rotate and clamp — otherwise the
+                    // portrait frame makes scaledToFit shrink the wide van to nothing.
                     Image("VanTop")
                         .resizable().scaledToFit()
+                        .frame(width: 210, height: 130)
                         .rotationEffect(.degrees(-90))
-                        .frame(width: 128, height: 208)
+                        .frame(width: 130, height: 210)
                     VStack {
                         bar(.front, horizontal: true)
                         Spacer()
