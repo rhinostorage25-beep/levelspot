@@ -28,7 +28,10 @@ struct LevelScanView: View {
     @State private var wasLevel = false
 
     private let dialSize: CGFloat = 280
-    private let levelTolDeg = 0.45   // the bubble-level "close enough" band, sensor-only (config-free)
+    // The "close enough" band for a VAN (not a survey instrument): ~1.2° is imperceptible when
+    // you're sleeping/cooking, and it stops a fraction-of-a-degree calibration residual (an iPhone
+    // can't sit perfectly flat — camera bump) from reading "off" on genuinely level ground.
+    private let levelTolDeg = 1.2
 
     private var isPro: Bool { entitlements.isPro }
 

@@ -25,6 +25,9 @@ struct VehicleSetupView: View {
     @State private var showPaywall = false
     @State private var showShop = false
     @State private var activeMeasure: MeasureTarget?
+    @State private var calibrating = false
+    @State private var calibCountdown = 3
+    @State private var calibJustSaved = false
 
     private let lastStep = 5
 
@@ -290,24 +293,37 @@ struct VehicleSetupView: View {
                 PhoneFlatDiagram().frame(height: 150).accessibilityHidden(true)
                 Text("Lay the phone exactly where it'll sit while you level — flat, screen up, top toward the front — on ground you KNOW is level. Then tap below.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
-                VStack(spacing: 4) {
-                    Text(String(format: "%.1f°", calibDegOff))
-                        .font(.system(size: 40, weight: .heavy, design: .rounded))
-                        .foregroundStyle(calibDegOff > 8 ? Theme.needsBigRamp : Color(.label))
-                        .contentTransition(.numericText())
-                    Text("reading right now").font(.caption).foregroundStyle(.secondary)
+                if calibrating {
+                    VStack(spacing: 6) {
+                        Text("Keep it flat — hands off").font(.headline)
+                        Text("\(calibCountdown)")
+                            .font(.system(size: 54, weight: .heavy, design: .rounded))
+                            .foregroundStyle(Color.accentColor)
+                            .contentTransition(.numericText())
+                    }
+                    .frame(height: 120)
+                } else {
+                    VStack(spacing: 4) {
+                        Text(String(format: "%.1f°", calibDegOff))
+                            .font(.system(size: 40, weight: .heavy, design: .rounded))
+                            .foregroundStyle(calibDegOff > 8 ? Theme.needsBigRamp : Color(.label))
+                            .contentTransition(.numericText())
+                        Text("reading right now").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Button { startCalibration() } label: {
+                        Label(motion.isCalibrated ? "Re-calibrate" : "Calibrate now", systemImage: "scope")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.large).padding(.horizontal)
+                    if calibJustSaved {
+                        Label("Calibrated & saved ✓", systemImage: "checkmark.seal.fill")
+                            .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.levelGreen)
+                    } else if motion.isCalibrated {
+                        Label("Already calibrated (saved)", systemImage: "checkmark.seal")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
-                Button {
-                    motion.calibrateHere(); Haptics.saved()
-                } label: {
-                    Label(motion.isCalibrated ? "Re-set level here" : "Set level here", systemImage: "scope")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent).controlSize(.large).padding(.horizontal)
-                if motion.isCalibrated {
-                    Label("Calibrated", systemImage: "checkmark.seal.fill").font(.footnote).foregroundStyle(Theme.levelGreen)
-                }
-                Text("You can skip this and calibrate later from the dial — but it's quick, and worth it.")
+                Text("Lay it flat, tap Calibrate, then keep still for the count — it saves automatically. You can also skip and do it later from the dial.")
                     .font(.caption2).foregroundStyle(.tertiary).multilineTextAlignment(.center).padding(.horizontal)
             }
             .padding(.vertical)
@@ -315,6 +331,23 @@ struct VehicleSetupView: View {
     }
 
     private var calibDegOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
+
+    /// Countdown calibration: you lay the phone flat and tap, then leave it — we zero the reading
+    /// once it's settled (hands off), not at the tap. Persists to UserDefaults automatically.
+    private func startCalibration() {
+        Task { @MainActor in
+            calibJustSaved = false
+            calibrating = true
+            for i in stride(from: 3, through: 1, by: -1) {
+                calibCountdown = i
+                try? await Task.sleep(for: .seconds(1))
+            }
+            motion.calibrateHere()
+            Haptics.saved()
+            calibrating = false
+            calibJustSaved = true
+        }
+    }
 
     // MARK: - Nav bar
 
@@ -419,6 +452,7 @@ struct AwningVan: View {
                     .frame(width: vanH, height: vanW)     // sized landscape...
                     .rotationEffect(.degrees(-90))         // ...then stood up, front to the top
                     .frame(width: vanW, height: vanH)
+                    .blendMode(.multiply)                  // drop the image's white box into the page
                     .position(x: cx, y: cy)
             }
             .frame(width: w, height: h)
@@ -430,8 +464,8 @@ struct AwningVan: View {
     private func awning(_ side: LivingSide, cx: CGFloat, cy: CGFloat, vanW: CGFloat, vanH: CGFloat) -> some View {
         let selected = selection == side
         let horizontal = (side == .left || side == .right)
-        let reach: CGFloat = horizontal ? vanW * 0.95 : vanH * 0.24    // how far it opens out
-        let thickness: CGFloat = horizontal ? vanH * 0.6 : vanW * 0.96 // fitted to the van's edge length
+        let reach: CGFloat = horizontal ? vanW * 1.0 : vanH * 0.22     // how far it opens out
+        let thickness: CGFloat = horizontal ? vanH * 0.82 : vanW * 0.9 // runs along most of the van's side
         let cw = horizontal ? reach : thickness
         let ch = horizontal ? thickness : reach
         let px: CGFloat = side == .left ? cx - vanW / 2 - reach / 2
@@ -466,10 +500,12 @@ private struct AwningCanopy: View {
                 ForEach(0..<n, id: \.self) { i in
                     Rectangle()
                         .fill(Color.white.opacity(i.isMultiple(of: 2) ? 0.18 : 0))
-                        .frame(width: horizontal ? g.size.width / CGFloat(n) : g.size.width,
-                               height: horizontal ? g.size.height : g.size.height / CGFloat(n))
-                        .position(x: horizontal ? g.size.width / CGFloat(n) * (CGFloat(i) + 0.5) : g.size.width / 2,
-                                  y: horizontal ? g.size.height / 2 : g.size.height / CGFloat(n) * (CGFloat(i) + 0.5))
+                        // Stripes run ALONG the roll-out direction: horizontal for a left/right
+                        // awning, vertical for a front/rear one.
+                        .frame(width: horizontal ? g.size.width : g.size.width / CGFloat(n),
+                               height: horizontal ? g.size.height / CGFloat(n) : g.size.height)
+                        .position(x: horizontal ? g.size.width / 2 : g.size.width / CGFloat(n) * (CGFloat(i) + 0.5),
+                                  y: horizontal ? g.size.height / CGFloat(n) * (CGFloat(i) + 0.5) : g.size.height / 2)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 6))
