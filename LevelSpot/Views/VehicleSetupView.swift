@@ -117,7 +117,7 @@ struct VehicleSetupView: View {
                               text: Binding<String>, target: MeasureTarget, hint: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             diagram
-                .frame(height: 116)
+                .frame(height: 170)
                 .frame(maxWidth: .infinity)
                 .accessibilityHidden(true)
             LabeledContent(label) {

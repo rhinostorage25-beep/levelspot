@@ -75,6 +75,7 @@ struct LevelScanView: View {
         VStack(spacing: 14) {
             if isPro { noticeZone }
             dial
+            sunHint
             levelStatus
             Spacer(minLength: 0)
         }
@@ -203,38 +204,39 @@ struct LevelScanView: View {
         let spyRed = Color(red: 0.98, green: 0.16, blue: 0.22)
         let target: Color = isLevel ? Theme.levelGreen : spyRed   // level scope: red targeting → green lock
         return ZStack {
-            Circle().fill(target.opacity(0.22)).frame(width: dialSize + 18, height: dialSize + 18).blur(radius: 10)
+            Circle().fill(target.opacity(0.30)).frame(width: dialSize + 18, height: dialSize + 18).blur(radius: 12)
 
-            // Your van from ABOVE (front at the top) on a light instrument disc — the targeting
-            // scope sits over it, so which way the van points on the leveller is obvious. Not black.
+            // Your van from ABOVE (front up) as a white wireframe on a DARK targeting scope — the
+            // sniper-scope look. colorInvert flips the black-on-white drawing to white-on-black.
             ZStack {
-                Circle().fill(Color(.systemBackground))
+                Color.black
                 Image("VanTop")
                     .resizable().scaledToFit()
+                    .colorInvert()
                     .rotationEffect(.degrees(-90))   // the drawing has the front on the right → point it up
-                    .frame(width: dialSize * 0.94, height: dialSize * 0.94)
-                    .opacity(0.9)
+                    .padding(dialSize * 0.06)
+                    .offset(x: dialSize * 0.02)       // source art sits a touch left — nudge to centre
+                    .opacity(0.92)
             }
             .frame(width: dialSize, height: dialSize)
             .clipShape(Circle())
-            .overlay(Circle().stroke(target.opacity(0.55), lineWidth: 2))
+            .overlay(Circle().stroke(target.opacity(0.6), lineWidth: 2))
 
-            // Sun layer — Pro, and only when the user turns it on (opt-in). Kept amber (never green,
-            // which read as confusing) — you turn the van until the sun dot reaches the top.
+            // Sun layer — Pro, opt-in only. Amber (never green — that read as "why is it green?").
             if isPro && sunOn {
-                Circle().stroke(Theme.sun.opacity(0.55), lineWidth: 2.5).frame(width: dialSize - 8, height: dialSize - 8)
+                Circle().stroke(Theme.sun.opacity(0.6), lineWidth: 2.5).frame(width: dialSize - 8, height: dialSize - 8)
                 sunMarker
             }
 
-            // Targeting scope — the free bubble level.
+            // Targeting scope.
             Circle()
-                .stroke(target.opacity(0.45), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [1.5, 10]))
+                .stroke(target.opacity(0.5), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [1.5, 10]))
                 .frame(width: dialSize - 26, height: dialSize - 26)
             ScopeTriangle().fill(target)   // NOSE marker (top = front of the van)
                 .frame(width: 22, height: 17).offset(y: -(dialSize / 2) + 3)
             Circle().stroke(target.opacity(0.55), lineWidth: 1.5).frame(width: 122, height: 122)
             Circle().stroke(target.opacity(0.4), lineWidth: 1).frame(width: 66, height: 66)
-            ScopeReticle().stroke(target.opacity(0.8), lineWidth: 1.3).frame(width: 140, height: 140)
+            ScopeReticle().stroke(target.opacity(0.85), lineWidth: 1.3).frame(width: 140, height: 140)
 
             Circle()
                 .fill(target)
@@ -246,15 +248,16 @@ struct LevelScanView: View {
         }
         .frame(width: dialSize + 18, height: dialSize + 18)
         .frame(maxWidth: .infinity)
-        .overlay(alignment: .bottom) {
-            if isPro && sunOn {
-                Text("Turn the van until ☀ reaches the top")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(Theme.sun)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .offset(y: -2)
-            }
+    }
+
+    /// Opt-in sun hint — shown BELOW the dial (not overlapping it) only when the sun planner is on.
+    @ViewBuilder private var sunHint: some View {
+        if isPro && sunOn {
+            Text("Turn the van until ☀ reaches the top")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(Theme.sun)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(.ultraThinMaterial, in: Capsule())
         }
     }
 
