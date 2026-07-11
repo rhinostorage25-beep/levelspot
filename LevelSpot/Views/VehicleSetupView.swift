@@ -317,7 +317,7 @@ struct SideDiagram: View {
                     Image("VanTop")
                         .resizable().scaledToFit()
                         .rotationEffect(.degrees(-90))
-                        .frame(width: 86, height: 140)
+                        .frame(width: 128, height: 208)
                     VStack {
                         bar(.front, horizontal: true)
                         Spacer()
@@ -331,7 +331,7 @@ struct SideDiagram: View {
                     }
                     .padding(4)
                 }
-                .frame(width: 96, height: 150)
+                .frame(width: 150, height: 224)
                 edgeLabel(.rear)
             }
             edgeLabel(.driver).rotationEffect(.degrees(90)).fixedSize()
@@ -340,10 +340,10 @@ struct SideDiagram: View {
     }
 
     private func bar(_ side: LivingSide, horizontal: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 4)
+        RoundedRectangle(cornerRadius: 5)
             .fill(selection == side ? Color.accentColor : Color(.tertiaryLabel))
-            .frame(width: horizontal ? 48 : 8, height: horizontal ? 8 : 84)
-            .contentShape(Rectangle().inset(by: -8))
+            .frame(width: horizontal ? 72 : 10, height: horizontal ? 10 : 128)
+            .contentShape(Rectangle().inset(by: -10))
             .onTapGesture { selection = side }
     }
 
