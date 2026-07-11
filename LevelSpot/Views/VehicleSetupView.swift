@@ -438,8 +438,8 @@ struct AwningVan: View {
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
-            let vanW = min(w * 0.28, 120)
-            let vanH = min(h * 0.86, vanW * 3.3)
+            let vanW = min(w * 0.38, 156)
+            let vanH = min(h * 0.9, vanW * 3.2)
             let cx = w / 2, cy = h / 2
             ZStack {
                 // All four awnings live here but only the SELECTED one is open (scaled to 1); the
@@ -464,14 +464,17 @@ struct AwningVan: View {
     private func awning(_ side: LivingSide, cx: CGFloat, cy: CGFloat, vanW: CGFloat, vanH: CGFloat) -> some View {
         let selected = selection == side
         let horizontal = (side == .left || side == .right)
-        let reach: CGFloat = horizontal ? vanW * 1.0 : vanH * 0.22     // how far it opens out
-        let thickness: CGFloat = horizontal ? vanH * 0.82 : vanW * 0.9 // runs along most of the van's side
+        let reach: CGFloat = horizontal ? vanW * 0.62 : vanH * 0.17     // how far it opens out (shorter now)
+        let thickness: CGFloat = horizontal ? vanH * 0.92 : vanW * 0.6  // runs the FULL roof length
         let cw = horizontal ? reach : thickness
         let ch = horizontal ? thickness : reach
-        let px: CGFloat = side == .left ? cx - vanW / 2 - reach / 2
-            : side == .right ? cx + vanW / 2 + reach / 2 : cx
-        let py: CGFloat = side == .front ? cy - vanH / 2 - reach / 2
-            : side == .rear ? cy + vanH / 2 + reach / 2 : cy
+        // Meet the van's visual edge, not the frame edge — the image has whitespace, so we come in.
+        let sideEdge = vanW * 0.24
+        let endEdge = vanH * 0.44
+        let px: CGFloat = side == .left ? cx - sideEdge - reach / 2
+            : side == .right ? cx + sideEdge + reach / 2 : cx
+        let py: CGFloat = side == .front ? cy - endEdge - reach / 2
+            : side == .rear ? cy + endEdge + reach / 2 : cy
         let anchor: UnitPoint = side == .left ? .trailing : side == .right ? .leading
             : side == .front ? .bottom : .top
 
