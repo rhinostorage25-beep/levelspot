@@ -205,19 +205,19 @@ struct LevelScanView: View {
         return ZStack {
             Circle().fill(target.opacity(0.22)).frame(width: dialSize + 18, height: dialSize + 18).blur(radius: 10)
 
-            // Your van from ABOVE (front at the top), seen through a translucent targeting scope —
-            // so it's obvious which way the van points on the leveller. Not a solid black disc.
+            // Your van from ABOVE (front at the top) on a light instrument disc — the targeting
+            // scope sits over it, so which way the van points on the leveller is obvious. Not black.
             ZStack {
-                Color(red: 0.13, green: 0.13, blue: 0.15)
-                TopVanSilhouette()
-                    .frame(width: dialSize * 0.40, height: dialSize * 0.80)
-                Circle().fill(
-                    RadialGradient(colors: [Color.black.opacity(0.02), Color.black.opacity(0.5)],
-                                   center: .center, startRadius: dialSize * 0.16, endRadius: dialSize * 0.52))
+                Circle().fill(Color(.systemBackground))
+                Image("VanTop")
+                    .resizable().scaledToFit()
+                    .rotationEffect(.degrees(-90))   // the drawing has the front on the right → point it up
+                    .frame(width: dialSize * 0.94, height: dialSize * 0.94)
+                    .opacity(0.9)
             }
             .frame(width: dialSize, height: dialSize)
             .clipShape(Circle())
-            .overlay(Circle().stroke(target.opacity(0.35), lineWidth: 1.5))
+            .overlay(Circle().stroke(target.opacity(0.55), lineWidth: 2))
 
             // Sun layer — Pro, and only when the user turns it on (opt-in). Kept amber (never green,
             // which read as confusing) — you turn the van until the sun dot reaches the top.
