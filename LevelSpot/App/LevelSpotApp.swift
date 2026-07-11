@@ -32,6 +32,9 @@ struct LevelSpotApp: App {
 
 struct RootView: View {
     @Query private var configs: [VehicleConfig]
+    // Chosen in the setup wizard's language step. Drives the app locale; once the app is localised
+    // (DE/FR/IT/ES/NL) this switches the strings. English-only for now, but the wiring is live.
+    @AppStorage("appLanguageCode") private var languageCode = "en"
 
     var body: some View {
         // Always open to the Level dial. Free users need no setup at all; Pro users who haven't
@@ -39,5 +42,6 @@ struct RootView: View {
         NavigationStack {
             LevelScanView(config: configs.first)
         }
+        .environment(\.locale, Locale(identifier: languageCode))
     }
 }

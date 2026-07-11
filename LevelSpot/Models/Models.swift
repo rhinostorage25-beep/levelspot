@@ -2,30 +2,28 @@ import Foundation
 import SwiftData
 import LevelSpotCore
 
-// "Nearside" and "offside" are banned terms anywhere in this codebase — they flip meaning
-// between left- and right-hand-drive markets and would silently invert recommendations for
-// a continental user. Living side is front/driver/rear/passenger; wheels are left/right.
+/// Which side you sit out on / the awning is. Plain Left/Right (not driver/passenger, which flip
+/// meaning between LHD and RHD markets) — unambiguous everywhere, and simpler for users.
 enum LivingSide: String, Codable, CaseIterable {
-    case front, driver, rear, passenger
+    case front, left, rear, right
 
     var label: String {
         switch self {
         case .front: return "Front"
-        case .driver: return "Driver"
+        case .left: return "Left"
         case .rear: return "Rear"
-        case .passenger: return "Passenger"
+        case .right: return "Right"
         }
     }
 
     /// The awning/living side as a bearing offset from the van's nose — front 0, rear 180,
-    /// right +90, left −90 — used by the sun/shade planner. Driver/passenger assume UK
-    /// right-hand drive (driver = right side); a market flip is a later refinement.
+    /// right +90, left −90 — used by the sun/shade planner.
     var awningOffsetDeg: Double {
         switch self {
         case .front: return 0
         case .rear: return 180
-        case .driver: return 90      // RHD: driver's side is the right
-        case .passenger: return -90  // left / kerb side
+        case .right: return 90
+        case .left: return -90
         }
     }
 }
