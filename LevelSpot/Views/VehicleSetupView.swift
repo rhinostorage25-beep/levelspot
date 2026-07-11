@@ -165,21 +165,21 @@ struct VehicleSetupView: View {
     // MARK: - Step 2 · Sit side
 
     private var sitSideStep: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                stepHeader("Which side do you sit out on?", "Tap your awning side — the sun & shade planner uses it to face the van the right way.")
-                AwningPicker(selection: $livingSide)
-                    .frame(height: 360)
-                    .padding(.horizontal)
-                Picker("Side", selection: sideBinding) {
-                    ForEach(LivingSide.allCases, id: \.self) { Text($0.label).tag(Optional($0)) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal)
+        VStack(spacing: 16) {
+            stepHeader("Which side do you sit out on?", "Pick your awning side — the sun & shade planner uses it to face the van the right way.")
+            // Buttons at the top; the diagram below just shows the awning opening on that side.
+            Picker("Side", selection: sideBinding) {
+                ForEach(LivingSide.allCases, id: \.self) { Text($0.label).tag(Optional($0)) }
             }
-            .padding(.vertical)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal)
+            AwningVan(selection: livingSide)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
         }
+        .padding(.top, 4)
     }
 
     // MARK: - Step 3 · Ramps
@@ -399,46 +399,41 @@ struct VehicleSetupView: View {
 
 /// Big top-view van with an awning on each side that ROLLS OUT when you tap it — the fun way to say
 /// "this is the side I sit out on." Front points up (matches the Level dial).
-struct AwningPicker: View {
-    @Binding var selection: LivingSide?
+struct AwningVan: View {
+    let selection: LivingSide?
 
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
-            let vanW = min(w * 0.32, 140.0)
-            let vanH = h * 0.72
-
+            let vanW = min(w * 0.28, 120)
+            let vanH = min(h * 0.86, vanW * 3.3)
+            let cx = w / 2, cy = h / 2
             ZStack {
-                sideControl(.left,  in: geo.size, vanW: vanW, vanH: vanH)
-                sideControl(.right, in: geo.size, vanW: vanW, vanH: vanH)
-                sideControl(.front, in: geo.size, vanW: vanW, vanH: vanH)
-                sideControl(.rear,  in: geo.size, vanW: vanW, vanH: vanH)
-
-                // The van (front up) sits on top so the awnings tuck under its edges.
+                // All four awnings live here but only the SELECTED one is open (scaled to 1); the
+                // rest are collapsed at the van edge (scale 0). Selection change animates the swap.
+                ForEach(LivingSide.allCases, id: \.self) { side in
+                    awning(side, cx: cx, cy: cy, vanW: vanW, vanH: vanH)
+                }
                 Image("VanTop")
                     .resizable().scaledToFit()
-                    .frame(width: vanH, height: vanW)     // sized in landscape...
-                    .rotationEffect(.degrees(-90))         // ...then stood up
+                    .frame(width: vanH, height: vanW)     // sized landscape...
+                    .rotationEffect(.degrees(-90))         // ...then stood up, front to the top
                     .frame(width: vanW, height: vanH)
-                    .position(x: w / 2, y: h / 2)
-                    .allowsHitTesting(false)
+                    .position(x: cx, y: cy)
             }
             .frame(width: w, height: h)
+            .animation(.spring(response: 0.5, dampingFraction: 0.72), value: selection)
         }
+        .allowsHitTesting(false)   // selection is via the buttons above — the diagram is display-only
     }
 
-    /// One tappable side: an always-present tap zone (subtle, labelled) with the awning canopy that
-    /// rolls out from the van's edge when it's the chosen side.
-    private func sideControl(_ side: LivingSide, in size: CGSize, vanW: CGFloat, vanH: CGFloat) -> some View {
+    private func awning(_ side: LivingSide, cx: CGFloat, cy: CGFloat, vanW: CGFloat, vanH: CGFloat) -> some View {
         let selected = selection == side
         let horizontal = (side == .left || side == .right)
-        let cx = size.width / 2, cy = size.height / 2
-        let reach: CGFloat = horizontal ? max(30, size.width / 2 - vanW / 2 - 4)
-                                        : max(30, size.height / 2 - vanH / 2 - 4)
-        let thickness: CGFloat = horizontal ? vanH * 0.6 : vanW * 0.9
-
-        let zoneW = horizontal ? reach : thickness
-        let zoneH = horizontal ? thickness : reach
+        let reach: CGFloat = horizontal ? vanW * 0.95 : vanH * 0.24    // how far it opens out
+        let thickness: CGFloat = horizontal ? vanH * 0.6 : vanW * 0.96 // fitted to the van's edge length
+        let cw = horizontal ? reach : thickness
+        let ch = horizontal ? thickness : reach
         let px: CGFloat = side == .left ? cx - vanW / 2 - reach / 2
             : side == .right ? cx + vanW / 2 + reach / 2 : cx
         let py: CGFloat = side == .front ? cy - vanH / 2 - reach / 2
@@ -446,30 +441,12 @@ struct AwningPicker: View {
         let anchor: UnitPoint = side == .left ? .trailing : side == .right ? .leading
             : side == .front ? .bottom : .top
 
-        return ZStack {
-            // Always-tappable zone (fades out once the awning is out)
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color(.tertiarySystemFill))
-                .overlay(
-                    Text(side.label.uppercased())
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(horizontal ? (side == .left ? -90 : 90) : 0))
-                )
-                .opacity(selected ? 0 : 1)
-
-            // The awning canopy rolls out from the van edge
-            AwningCanopy(selected: selected, horizontal: horizontal, label: side.label)
-                .scaleEffect(x: horizontal ? (selected ? 1 : 0.001) : 1,
-                             y: horizontal ? 1 : (selected ? 1 : 0.001),
-                             anchor: anchor)
-        }
-        .frame(width: zoneW, height: zoneH)
-        .position(x: px, y: py)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) { selection = side }
-        }
+        return AwningCanopy(selected: selected, horizontal: horizontal, label: side.label)
+            .frame(width: cw, height: ch)
+            .scaleEffect(x: horizontal ? (selected ? 1 : 0) : 1,
+                         y: horizontal ? 1 : (selected ? 1 : 0),
+                         anchor: anchor)
+            .position(x: px, y: py)
     }
 }
 
