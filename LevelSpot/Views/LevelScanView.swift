@@ -17,6 +17,7 @@ struct LevelScanView: View {
 
     @State private var audio = AudioCoach()
     @State private var sunPref: SunPreference = .sun
+    @State private var sunOn = false          // sun planner is opt-in via the ☀ menu (was confusing on by default)
     @State private var armed = false
     @State private var showCalibrate = false
     @State private var showSetup = false
@@ -54,7 +55,7 @@ struct LevelScanView: View {
         return SolarPosition.at(latitude: lat, longitude: lon, date: eveningDate)
     }
     private var sunTarget: Double? {
-        guard isPro, let config, let s = eveningSun, s.isUp else { return nil }
+        guard isPro, sunOn, let config, let s = eveningSun, s.isUp else { return nil }
         return SolarPosition.vanHeadingForAwning(sunAzimuthDeg: s.azimuthDeg,
                                                  awningOffsetDeg: config.livingSide.awningOffsetDeg,
                                                  preference: sunPref)
@@ -202,35 +203,59 @@ struct LevelScanView: View {
         let spyRed = Color(red: 0.98, green: 0.16, blue: 0.22)
         let target: Color = isLevel ? Theme.levelGreen : spyRed   // level scope: red targeting → green lock
         return ZStack {
-            Circle().fill(target.opacity(0.20)).frame(width: dialSize + 18, height: dialSize + 18).blur(radius: 9)
-            Circle().fill(Color(red: 0.09, green: 0.09, blue: 0.11)).frame(width: dialSize, height: dialSize)
+            Circle().fill(target.opacity(0.22)).frame(width: dialSize + 18, height: dialSize + 18).blur(radius: 10)
 
-            // Sun layer — Pro only.
-            if isPro {
-                Circle().stroke(Theme.sun.opacity(0.6), lineWidth: 2.5).frame(width: dialSize - 8, height: dialSize - 8)
+            // Your van from ABOVE (front at the top), seen through a translucent targeting scope —
+            // so it's obvious which way the van points on the leveller. Not a solid black disc.
+            ZStack {
+                Color(red: 0.13, green: 0.13, blue: 0.15)
+                TopVanSilhouette()
+                    .frame(width: dialSize * 0.40, height: dialSize * 0.80)
+                Circle().fill(
+                    RadialGradient(colors: [Color.black.opacity(0.02), Color.black.opacity(0.5)],
+                                   center: .center, startRadius: dialSize * 0.16, endRadius: dialSize * 0.52))
+            }
+            .frame(width: dialSize, height: dialSize)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(target.opacity(0.35), lineWidth: 1.5))
+
+            // Sun layer — Pro, and only when the user turns it on (opt-in). Kept amber (never green,
+            // which read as confusing) — you turn the van until the sun dot reaches the top.
+            if isPro && sunOn {
+                Circle().stroke(Theme.sun.opacity(0.55), lineWidth: 2.5).frame(width: dialSize - 8, height: dialSize - 8)
                 sunMarker
             }
 
             // Targeting scope — the free bubble level.
             Circle()
-                .stroke(target.opacity(0.4), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [1.5, 10]))
+                .stroke(target.opacity(0.45), style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [1.5, 10]))
                 .frame(width: dialSize - 26, height: dialSize - 26)
-            ScopeTriangle().fill(target)   // NOSE marker (top)
+            ScopeTriangle().fill(target)   // NOSE marker (top = front of the van)
                 .frame(width: 22, height: 17).offset(y: -(dialSize / 2) + 3)
-            Circle().stroke(target.opacity(0.5), lineWidth: 1.5).frame(width: 122, height: 122)
-            Circle().stroke(target.opacity(0.35), lineWidth: 1).frame(width: 66, height: 66)
-            ScopeReticle().stroke(target.opacity(0.7), lineWidth: 1.3).frame(width: 140, height: 140)
+            Circle().stroke(target.opacity(0.55), lineWidth: 1.5).frame(width: 122, height: 122)
+            Circle().stroke(target.opacity(0.4), lineWidth: 1).frame(width: 66, height: 66)
+            ScopeReticle().stroke(target.opacity(0.8), lineWidth: 1.3).frame(width: 140, height: 140)
 
             Circle()
                 .fill(target)
                 .frame(width: 36, height: 36)
-                .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 2))
+                .overlay(Circle().stroke(.white.opacity(0.95), lineWidth: 2))
                 .shadow(color: target.opacity(0.9), radius: 9)
                 .offset(x: bubbleOffset.width, y: bubbleOffset.height)
                 .animation(.snappy(duration: 0.12), value: bubbleOffset)
         }
         .frame(width: dialSize + 18, height: dialSize + 18)
         .frame(maxWidth: .infinity)
+        .overlay(alignment: .bottom) {
+            if isPro && sunOn {
+                Text("Turn the van until ☀ reaches the top")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(Theme.sun)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .offset(y: -2)
+            }
+        }
     }
 
     private var bubbleOffset: CGSize {
@@ -245,9 +270,9 @@ struct LevelScanView: View {
         if let rel = sunRel {
             ZStack {
                 Image(systemName: "sun.max.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
-                    .shadow(color: (sunAligned ? Theme.levelGreen : Theme.sun).opacity(0.9), radius: 7)
+                    .font(.system(size: 30))
+                    .foregroundStyle(Theme.sun)   // always amber — green here read as "why is it green?"
+                    .shadow(color: Theme.sun.opacity(0.9), radius: 7)
                     .offset(y: -(dialSize / 2) + 28)
             }
             .frame(width: dialSize, height: dialSize)
@@ -323,14 +348,17 @@ struct LevelScanView: View {
 
     private var sunMenu: some View {
         Menu {
-            Button { sunPref = .sun } label: {
-                Label("Chase sun", systemImage: sunPref == .sun ? "checkmark" : "sun.max")
+            Button { sunOn = false } label: {
+                Label("Sun planner off", systemImage: !sunOn ? "checkmark" : "sun.max.trianglebadge.exclamationmark")
             }
-            Button { sunPref = .shade } label: {
-                Label("Find shade", systemImage: sunPref == .shade ? "checkmark" : "cloud.sun")
+            Button { sunOn = true; sunPref = .sun } label: {
+                Label("Chase the sun", systemImage: (sunOn && sunPref == .sun) ? "checkmark" : "sun.max")
+            }
+            Button { sunOn = true; sunPref = .shade } label: {
+                Label("Find the shade", systemImage: (sunOn && sunPref == .shade) ? "checkmark" : "cloud.sun")
             }
         } label: {
-            Image(systemName: "sun.max")
+            Image(systemName: sunOn ? "sun.max.fill" : "sun.max")
         }
     }
 

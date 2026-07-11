@@ -38,3 +38,30 @@ struct ScopeTriangle: Shape {
         return p
     }
 }
+
+/// A top-down van silhouette, FRONT AT THE TOP — sits under the Level dial so it's obvious which
+/// way the van points on the leveller (the nose marker and the windscreen both sit at the top).
+struct TopVanSilhouette: View {
+    var body: some View {
+        Canvas { ctx, size in
+            let w = size.width, h = size.height
+            // Wheels first (so the body sits over them), sticking slightly past the sides.
+            let wheelW = w * 0.11, wheelH = h * 0.12
+            for (cx, cy) in [(w * 0.12, h * 0.24), (w * 0.88, h * 0.24),
+                             (w * 0.12, h * 0.80), (w * 0.88, h * 0.80)] {
+                let wheel = Path(roundedRect: CGRect(x: cx - wheelW / 2, y: cy - wheelH / 2, width: wheelW, height: wheelH),
+                                 cornerSize: CGSize(width: 3, height: 3))
+                ctx.fill(wheel, with: .color(.black.opacity(0.6)))
+            }
+            // Body — rounded, nose (front) at the top.
+            let body = Path(roundedRect: CGRect(x: w * 0.16, y: h * 0.03, width: w * 0.68, height: h * 0.94),
+                            cornerSize: CGSize(width: w * 0.24, height: w * 0.24))
+            ctx.fill(body, with: .color(.white.opacity(0.5)))
+            ctx.stroke(body, with: .color(.white.opacity(0.75)), lineWidth: 1)
+            // Windscreen band across the top = the front.
+            let wind = Path(roundedRect: CGRect(x: w * 0.23, y: h * 0.08, width: w * 0.54, height: h * 0.09),
+                            cornerSize: CGSize(width: 4, height: 4))
+            ctx.fill(wind, with: .color(.black.opacity(0.32)))
+        }
+    }
+}
