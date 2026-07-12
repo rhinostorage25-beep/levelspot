@@ -396,6 +396,16 @@ struct LevelScanView: View {
         Button { showCalibrate = true } label: {
             Image(systemName: motion.isCalibrated ? "scope" : "exclamationmark.triangle")
         }
+        // TestFlight-only Pro preview toggle — see EntitlementStore.previewProOn. A simultaneous
+        // gesture so it doesn't steal the button's normal tap; deliberately not a visible
+        // control, so App Store review won't stumble onto a free-Pro switch. MUST be removed
+        // (or verified never triggered) before submission — see the EntitlementStore doc.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 1.5).onEnded { _ in
+                entitlements.setPreviewPro(!entitlements.previewProOn)
+                Haptics.saved()
+            }
+        )
     }
 
     private var sunMenu: some View {

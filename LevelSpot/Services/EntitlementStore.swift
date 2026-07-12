@@ -20,18 +20,30 @@ final class EntitlementStore {
     /// App Store Connect (and any local .storekit config used for simulator testing).
     static let proProductID = "uk.co.levelspot.pro"
 
-    /// ⚠️ TEMPORARY TESTFLIGHT LEVER. Applies in Release (unlike the DEBUG toggle below).
-    /// - `true`  → forces every Pro surface ON (demo the Pro app; the `uk.co.levelspot.pro`
-    ///            product doesn't exist yet so a real purchase can't transact).
-    /// - `false` → shows the FREE tier (the whole revenue path — ramp coaching + the
-    ///            affiliate shop — is free now; only the sun planner + guided air-ramp flow
-    ///            stay behind the paywall).
-    /// **MUST be `false` before the App Store submission** either way — see the memory note.
-    /// `false` post funnel-flip so TestFlight shows the real free funnel; use the DEBUG
-    /// toggle (Sim menu) to exercise the two Pro surfaces locally.
-    static let forceProForTesting = false
+    /// ⚠️ TESTFLIGHT PREVIEW LEVER — works in Release (not `#if DEBUG`), because Windows-only
+    /// dev means TestFlight is the only way to see a device build; there's no local Xcode run
+    /// to reach the DEBUG sim toggle. Toggled from inside the app itself (long-press the
+    /// calibrate icon on the Level screen — deliberately not a visible button, so a reviewer
+    /// tapping through the app in the normal way won't stumble onto a free-Pro switch) and
+    /// persisted so it survives relaunch. Real purchases/restores always win over this.
+    /// **MUST be OFF before App Store submission — this is a live toggle, not a build-time
+    /// constant, so it ships in every build regardless of state. Removing the gesture (or at
+    /// minimum confirming it's off and staying off) is a required submission step.**
+    private static let previewKey = "proPreviewOverride"
+    private(set) var previewProOn = UserDefaults.standard.bool(forKey: EntitlementStore.previewKey)
 
-    private(set) var isPro = forceProForTesting
+    /// Flip the TestFlight preview lever. Fires a fresh `updateEntitlement()` so `isPro`
+    /// reflects it immediately (real entitlement still takes priority if present).
+    func setPreviewPro(_ on: Bool) {
+        previewProOn = on
+        UserDefaults.standard.set(on, forKey: Self.previewKey)
+        Task { await updateEntitlement() }
+    }
+
+    // Seeded synchronously from the same persisted flag (can't reference `previewProOn`
+    // directly here — Swift forbids one stored-property default from reading another).
+    // `updateEntitlement()` re-derives this properly moments later at launch.
+    private(set) var isPro = UserDefaults.standard.bool(forKey: EntitlementStore.previewKey)
     private(set) var proProduct: Product?
     private(set) var purchaseInFlight = false
     private(set) var lastError: String?
@@ -73,7 +85,7 @@ final class EntitlementStore {
                 entitled = true
             }
         }
-        isPro = entitled || Self.forceProForTesting   // remove the OR with forceProForTesting at release
+        isPro = entitled || previewProOn   // remove the OR with previewProOn before App Store submission
     }
 
     /// Kick off the purchase. Safe to call before the product exists in App Store Connect —
