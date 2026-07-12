@@ -5,20 +5,18 @@ import SwiftData
 /// calibrate. One clear thing per page, Back/Next at the bottom. The old single scrolling form is
 /// gone. Reached from the dial's gear menu.
 struct VehicleSetupView: View {
-    /// `.firstRun` = the full six-step onboarding (language included). `.editActive`
-    /// prefill-and-replaces the active vehicle and SKIPS the language step (language lives in
-    /// Settings now); Settings rows deep-link it to a specific step via `startStep`.
+    /// `.firstRun` = the five-step onboarding (measure → side → ramps → sun → calibrate;
+    /// language lives ONLY in Settings — it was here once and read as a duplicate).
+    /// `.editActive` = single-page edit + Save, deep-linked from a Settings row via `startStep`.
     /// `.addNew` (Pro multi-vehicle) starts blank at the measure step and inserts alongside.
     enum SetupMode { case firstRun, editActive, addNew }
     let mode: SetupMode
-    /// The earliest step this run can reach (0 for first-run, else 1 — no language step).
-    private let firstStep: Int
+    /// Steps run 1–5; there is no step 0 any more.
+    private let firstStep = 1
 
     init(mode: SetupMode = .editActive, startStep: Int? = nil) {
         self.mode = mode
-        let base = mode == .firstRun ? 0 : 1
-        self.firstStep = base
-        _step = State(initialValue: min(max(startStep ?? base, base), 5))
+        _step = State(initialValue: min(max(startStep ?? 1, 1), 5))
     }
 
     @Environment(\.modelContext) private var modelContext
@@ -26,8 +24,6 @@ struct VehicleSetupView: View {
     @Environment(MotionService.self) private var motion
     // Newest updatedAt first — .first is the ACTIVE vehicle (matches RootView's ordering).
     @Query(sort: \VehicleConfig.updatedAt, order: .reverse) private var existingConfigs: [VehicleConfig]
-    @AppStorage("appLanguageCode") private var languageCode = "en"
-
     private let ref = ReferenceStore.shared.data
 
     @State private var step: Int
@@ -48,11 +44,6 @@ struct VehicleSetupView: View {
 
     private let lastStep = 5
 
-    private let languages: [(code: String, name: String, flag: String)] = [
-        ("en", "English", "🇬🇧"), ("de", "Deutsch", "🇩🇪"), ("fr", "Français", "🇫🇷"),
-        ("it", "Italiano", "🇮🇹"), ("es", "Español", "🇪🇸"), ("nl", "Nederlands", "🇳🇱"),
-    ]
-
     // MARK: - Body
 
     var body: some View {
@@ -62,7 +53,6 @@ struct VehicleSetupView: View {
             if mode != .editActive { progressDots }
             Group {
                 switch step {
-                case 0: languageStep
                 case 1: measureStep
                 case 2: sitSideStep
                 case 3: rampsStep
@@ -107,37 +97,6 @@ struct VehicleSetupView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal)
         .padding(.top, 8)
-    }
-
-    // MARK: - Step 0 · Language
-
-    private var languageStep: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                stepHeader("Choose your language", "You can change this any time in Settings.")
-                VStack(spacing: 10) {
-                    ForEach(languages, id: \.code) { lang in
-                        Button { languageCode = lang.code } label: {
-                            HStack(spacing: 12) {
-                                Text(lang.flag).font(.title2)
-                                Text(lang.name).font(.body).foregroundStyle(.primary)
-                                Spacer()
-                                if languageCode == lang.code {
-                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
-                                }
-                            }
-                            .padding(14)
-                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal)
-                Text("The app is in English for now — the other languages are coming soon.")
-                    .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center).padding(.horizontal)
-            }
-            .padding(.vertical)
-        }
     }
 
     // MARK: - Step 1 · Measure

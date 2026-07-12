@@ -44,7 +44,6 @@ struct LevelScanView: View {
     @State private var shownPitch: PitchRecord?
     @State private var shopNeededMM: Int?
     @State private var wasLevel = false
-    @State private var proToggleFired = false   // long-press fired — swallow the button tap once
 
     private let dialSize: CGFloat = 280
     // The "close enough" band for a VAN (not a survey instrument): ~1.2° is imperceptible when
@@ -582,29 +581,12 @@ struct LevelScanView: View {
     // MARK: - Toolbar menus
 
     private var calibrateButton: some View {
-        Button {
-            // A Button still fires on touch-up after a long hold, so without this flag every
-            // Pro toggle would ALSO open the calibrate sheet on finger-lift.
-            if proToggleFired { proToggleFired = false } else { showCalibrate = true }
-        } label: {
+        // The TestFlight Pro-preview lever moved to an explicit toggle in Settings — the hidden
+        // long-press here was undiscoverable and broke the moment the toolbar gained the ☀
+        // button next door (testers pressed the wrong icon). Plain calibrate button again.
+        Button { showCalibrate = true } label: {
             Image(systemName: motion.isCalibrated ? "scope" : "exclamationmark.triangle")
         }
-        // TestFlight-only Pro preview toggle — see EntitlementStore.previewProOn. A simultaneous
-        // gesture so it doesn't steal the button's normal tap; deliberately not a visible
-        // control, so App Store review won't stumble onto a free-Pro switch. MUST be removed
-        // (or verified never triggered) before submission — see the EntitlementStore doc.
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 1.5).onEnded { _ in
-                proToggleFired = true
-                entitlements.setPreviewPro(!entitlements.previewProOn)
-                Haptics.saved()
-                // If the tap never lands (finger dragged off), don't swallow the NEXT tap.
-                Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(1))
-                    proToggleFired = false
-                }
-            }
-        )
     }
 
     /// Sun planner presets (Pro) — one flat list: each moment pairs a time of day with the

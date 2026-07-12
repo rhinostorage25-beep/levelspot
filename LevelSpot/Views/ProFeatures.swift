@@ -123,6 +123,7 @@ enum SettingsAction {
 struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(EntitlementStore.self) private var entitlements
     @Query(sort: \VehicleConfig.updatedAt, order: .reverse) private var vehicles: [VehicleConfig]
     @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
     @AppStorage("appLanguageCode") private var languageCode = "en"
@@ -141,6 +142,7 @@ struct SettingsSheet: View {
                 vehicleSection
                 sleepSection
                 languageSection
+                proPreviewSection
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -156,7 +158,7 @@ struct SettingsSheet: View {
     @ViewBuilder private var vehicleSection: some View {
         if vehicles.isEmpty {
             Section {
-                Button { act(.openWizard(.firstRun, startStep: 0)) } label: {
+                Button { act(.openWizard(.firstRun, startStep: 1)) } label: {
                     Label("Set up your van", systemImage: "car")
                 }
             } footer: {
@@ -268,6 +270,27 @@ struct SettingsSheet: View {
             .pickerStyle(.menu)
         } footer: {
             Text("The app is in English for now — the other languages are coming soon.")
+        }
+    }
+
+    // MARK: TestFlight Pro preview
+
+    /// ⚠️ BETA-ONLY LEVER — the whole section MUST be deleted before App Store submission
+    /// (see the levelspot-pro-test-unlock memory note). Replaces the old hidden long-press on
+    /// the calibrate icon, which was undiscoverable and broke the moment the toolbar changed.
+    /// Real purchases always win over this flag (see EntitlementStore.updateEntitlement).
+    private var proPreviewSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { entitlements.previewProOn },
+                set: { entitlements.setPreviewPro($0) }
+            )) {
+                Label("Pro preview", systemImage: "wand.and.stars")
+            }
+        } header: {
+            Text("TestFlight testing")
+        } footer: {
+            Text("Beta-only switch: flips every Pro feature on without a purchase, so you can test both tiers. Removed before App Store release.")
         }
     }
 
