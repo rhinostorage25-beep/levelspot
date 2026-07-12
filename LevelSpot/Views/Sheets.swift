@@ -22,13 +22,19 @@ struct PaywallSheet: View {
                     .accessibilityHidden(true)
 
                 Text("LevelSpot Pro").font(.title2.weight(.bold))
-                Text("Two extras for the fussy pitch.")
+                Text("The Perfect Pitch pack — sun, memory, sleep and your whole fleet.")
                     .font(.subheadline).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
                 VStack(alignment: .leading, spacing: 16) {
-                    benefit("sun.max.fill", "Sun & shade planner",
-                            "Face the van the right way for sun — or shade — under your awning.")
+                    benefit("sun.max.fill", "Sun & shade, all day",
+                            "Morning sun, midday shade or evening sun — see the sun's whole path round the dial and park right first time.")
+                    benefit("mappin.and.ellipse", "Pitch memory",
+                            "Save a pitch and get the exact levelling recipe back the next time you return.")
+                    benefit("bed.double.fill", "Sleep setup",
+                            "A touch of head-up tilt built into the level target. Still fridge-safe.")
+                    benefit("car.2.fill", "All your vehicles",
+                            "Van, caravan, trailer — separate setups, one tap to switch.")
                     benefit("scope", "Guided air-ramp levelling",
                             "Step-by-step wheel-by-wheel targets for air bags, blocks & ratchet levellers.")
                 }
@@ -53,6 +59,9 @@ struct PaywallSheet: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .disabled(entitlements.purchaseInFlight)
+
+                Text("One-time purchase — yours for good. No subscription.")
+                    .font(.caption2).foregroundStyle(.tertiary)
 
                 Button("Restore purchases") {
                     Task {

@@ -31,7 +31,9 @@ struct LevelSpotApp: App {
 }
 
 struct RootView: View {
-    @Query private var configs: [VehicleConfig]
+    // Newest updatedAt = the ACTIVE vehicle. Multi-vehicle (Pro) switches by touching updatedAt —
+    // deliberately no schema change, so no SwiftData migration risk (see pro-pack-spec.md).
+    @Query(sort: \VehicleConfig.updatedAt, order: .reverse) private var configs: [VehicleConfig]
     // Chosen in the setup wizard's language step. Drives the app locale; once the app is localised
     // (DE/FR/IT/ES/NL) this switches the strings. English-only for now, but the wiring is live.
     @AppStorage("appLanguageCode") private var languageCode = "en"

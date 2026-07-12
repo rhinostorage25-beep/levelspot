@@ -33,6 +33,11 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        // This delegate fires on manager CREATION (app launch) with .notDetermined. Asking for
+        // permission there would prompt every fresh install at first open — free users must
+        // never see a location prompt (funnel-flip contract). Only react to real grants/denials;
+        // the ask itself happens solely via an explicit requestAndStart() (Pro surfaces).
+        guard manager.authorizationStatus != .notDetermined else { return }
         requestAndStart()
     }
 

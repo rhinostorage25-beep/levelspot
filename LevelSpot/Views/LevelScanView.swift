@@ -1,12 +1,14 @@
 import SwiftUI
+import SwiftData
 import LevelSpotCore
 
 /// The one screen.
 /// FREE = the bubble level, calibrate, drive-up ramp coaching (honest can't-level maths, rough
 /// default geometry until the van is set up), the affiliate shop and the audio chime — the whole
 /// revenue path is free so every user reaches the "buy ramps that reach it" moment.
-/// PRO = the two comfort features: the sun & shade planner, and the guided wheel-by-wheel flow
-/// for air/blocks/ratchet levellers. Fixed layout: the dial never moves and every text zone is a
+/// PRO = the "Perfect Pitch" pack (see pro-pack-spec.md): all-day sun & shade planning with the
+/// day arc, pitch memory, sleep tilt, multi-vehicle, and the guided wheel-by-wheel flow for
+/// air/blocks/ratchet levellers. Fixed layout: the dial never moves and every text zone is a
 /// constant-height slot, so nothing jumps as the tilt crosses thresholds.
 struct LevelScanView: View {
     /// nil until the van is set up — ramp coaching still works via rough-default geometry, and
@@ -16,18 +18,31 @@ struct LevelScanView: View {
     @Environment(MotionService.self) private var motion
     @Environment(LocationService.self) private var location
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(\.modelContext) private var modelContext
+
+    // Pro pack data: every vehicle (newest updatedAt = active) and the saved pitches.
+    @Query(sort: \VehicleConfig.updatedAt, order: .reverse) private var allConfigs: [VehicleConfig]
+    @Query private var pitches: [PitchRecord]
+    // Sleep tilt — where the bed's head end is. Free tier ignores the stored value.
+    @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
 
     @State private var audio = AudioCoach()
-    @State private var sunPref: SunPreference = .sun
-    @State private var sunOn = false          // sun planner is opt-in via the ☀ menu (was confusing on by default)
+    @State private var sunMoment: SunMoment?   // sun planner is opt-in via the ☀ menu; nil = off
+    @State private var sunArcAzimuths: [Double] = []   // today's hourly sun azimuths (sun-up only)
     @State private var armed = false
+    @State private var armPlan: LevelPlan?     // the plan when Start was tapped — the pitch "recipe"
     @State private var showCalibrate = false
     @State private var showSetup = false
+    @State private var setupMode: VehicleSetupView.SetupMode = .editActive
     @State private var showPaywall = false
     @State private var showInflateGuide = false
     @State private var showRampShop = false
+    @State private var showSleepSetup = false
+    @State private var savePitchData: SavePitchData?
+    @State private var shownPitch: PitchRecord?
     @State private var shopNeededMM: Int?
     @State private var wasLevel = false
+    @State private var proToggleFired = false   // long-press fired — swallow the button tap once
 
     private let dialSize: CGFloat = 280
     // The "close enough" band for a VAN (not a survey instrument): ~1.2° is imperceptible when
@@ -39,7 +54,15 @@ struct LevelScanView: View {
 
     // MARK: - Derived
 
-    private var degOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
+    /// Sleep tilt (Pro): the whole screen — dial, degrees, coaching — aims at a target that sits
+    /// `tiltDeg` high at the bed's head end, so "LEVEL" means "level, with your pillow up a touch".
+    private var sleepHeadEnd: SleepHeadEnd {
+        isPro ? (SleepHeadEnd(rawValue: sleepHeadEndRaw) ?? .off) : .off
+    }
+    private var effRollDeg: Double { motion.rollDeg - sleepHeadEnd.rollTargetDeg }
+    private var effPitchDeg: Double { motion.pitchDeg - sleepHeadEnd.pitchTargetDeg }
+
+    private var degOff: Double { max(abs(effRollDeg), abs(effPitchDeg)) }
     private var isLevel: Bool { degOff < levelTolDeg }
 
     // Rough-default geometry — ramp coaching is FREE and works with zero setup. 1800mm track
@@ -63,13 +86,14 @@ struct LevelScanView: View {
     private var isPhoneFlatEnough: Bool { degOff <= 15 }
 
     /// Ramp plan — free for everyone. Uses the van's real geometry once set up, otherwise the
-    /// rough defaults above so coaching works from first launch with zero setup.
+    /// rough defaults above so coaching works from first launch with zero setup. Fed the
+    /// sleep-adjusted attitude so ramp targets land on the same shifted "level" as the dial.
     private var plan: LevelPlan? {
         guard isPhoneFlatEnough else { return nil }
         let wheelbase = config.map { Double($0.wheelbaseMM) } ?? Self.roughWheelbaseMM
         let trackFront = config.map { Double($0.trackFrontMM) } ?? Self.roughTrackMM
         let trackRear = config.map { Double($0.trackRearMM) } ?? Self.roughTrackMM
-        return RampAdvisor.plan(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
+        return RampAdvisor.plan(rollDeg: effRollDeg, pitchDeg: effPitchDeg,
                                 trackFrontMM: trackFront, trackRearMM: trackRear,
                                 wheelbaseMM: wheelbase,
                                 ramp: effectiveRampSet, tolerance: .comfort)
@@ -80,25 +104,48 @@ struct LevelScanView: View {
     /// always a stepped set, so free/unset-up users get the drive-up flow, not this one.
     private var usesPerWheelFlow: Bool { effectiveRampSet.kind.isPerWheel }
 
-    private var eveningDate: Date { Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: Date()) ?? Date() }
-    private var eveningSun: SunPosition? {
-        guard let lat = location.latitude, let lon = location.longitude else { return nil }
-        return SolarPosition.at(latitude: lat, longitude: lon, date: eveningDate)
+    /// Sun position at the chosen moment (Pro sun planner). nil when the planner is off or
+    /// there's no location fix yet.
+    private var sunPosition: SunPosition? {
+        guard let moment = sunMoment, let lat = location.latitude, let lon = location.longitude else { return nil }
+        return SolarPosition.at(latitude: lat, longitude: lon, date: moment.date())
     }
     private var sunTarget: Double? {
-        guard isPro, sunOn, let config, let s = eveningSun, s.isUp else { return nil }
+        guard isPro, let moment = sunMoment, let config, let s = sunPosition, s.isUp else { return nil }
         return SolarPosition.vanHeadingForAwning(sunAzimuthDeg: s.azimuthDeg,
                                                  awningOffsetDeg: config.livingSide.awningOffsetDeg,
-                                                 preference: sunPref)
+                                                 preference: moment.preference)
     }
     private var sunRel: Double? {
         guard let t = sunTarget, let cur = location.headingDeg else { return nil }
-        var d = (t - Double(cur)).truncatingRemainder(dividingBy: 360)
+        return Self.signedDelta(t - Double(cur))
+    }
+    private var sunAligned: Bool { sunRel.map { abs($0) < 10 } ?? false }
+
+    /// Wrap a bearing difference into −180…180.
+    private static func signedDelta(_ raw: Double) -> Double {
+        var d = raw.truncatingRemainder(dividingBy: 360)
         if d > 180 { d -= 360 }
         if d < -180 { d += 360 }
         return d
     }
-    private var sunAligned: Bool { sunRel.map { abs($0) < 10 } ?? false }
+
+    /// Today's hourly sun azimuths (sun-up hours only) for the day arc. Azimuths don't depend on
+    /// the compass heading, so this is computed once per appearance / preset change / first fix —
+    /// the per-frame cost of heading updates stays a handful of subtractions.
+    private func recomputeSunArc() {
+        guard isPro, sunMoment != nil, let lat = location.latitude, let lon = location.longitude else {
+            sunArcAzimuths = []
+            return
+        }
+        var azimuths: [Double] = []
+        for hour in 5...21 {
+            guard let d = Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date()) else { continue }
+            let p = SolarPosition.at(latitude: lat, longitude: lon, date: d)
+            if p.isUp { azimuths.append(p.azimuthDeg) }
+        }
+        sunArcAzimuths = azimuths
+    }
 
     // MARK: - Body (fixed layout — nothing here changes size as you tilt)
 
@@ -119,26 +166,28 @@ struct LevelScanView: View {
         .onAppear {
             motion.start()
             audio.start()                                  // audio is free now
-            if isPro { location.requestAndStart() }         // sun planner stays Pro-only
+            if isPro { location.requestAndStart() }         // sun planner + pitch memory are Pro-only
+            recomputeSunArc()
         }
         .onDisappear { motion.stop(); audio.stop() }
         .onChange(of: isLevel) { _, nowLevel in
             if nowLevel && !wasLevel && armed { Haptics.levelReached(); audio.alertLevel() }
             wasLevel = nowLevel
         }
+        .onChange(of: sunMoment) { recomputeSunArc() }
+        .onChange(of: location.latitude) { recomputeSunArc() }   // the first GPS fix arrives async
         .sheet(isPresented: $showCalibrate) { CalibrateView() }
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
         .sheet(isPresented: $showRampShop) { RampShopSheet(neededMM: shopNeededMM) }
+        .sheet(isPresented: $showSleepSetup) { SleepSetupSheet() }
+        .sheet(item: $savePitchData) { data in SavePitchSheet(data: data) }
+        .sheet(item: $shownPitch) { pitch in PitchDetailSheet(pitch: pitch) }
         .fullScreenCover(isPresented: $showInflateGuide) {
             if let config { InflationGuideView(config: config) }
         }
-        .navigationDestination(isPresented: $showSetup) { VehicleSetupView() }
+        .navigationDestination(isPresented: $showSetup) { VehicleSetupView(mode: setupMode) }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { showSetup = true } label: {
-                    Image(systemName: "gearshape").accessibilityLabel("Setup")
-                }
-            }
+            ToolbarItem(placement: .topBarLeading) { gearMenu }
             ToolbarItem(placement: .topBarTrailing) { calibrateButton }
             if isPro {
                 ToolbarItem(placement: .topBarTrailing) { sunMenu }
@@ -173,16 +222,44 @@ struct LevelScanView: View {
                     noticeCard(rampNotice(plan), tappable: false)
                 }
 
-                if usingRoughDefaults {
-                    Button { showSetup = true } label: {
+            }
+
+            // ONE always-reserved, constant-height sub-slot (fixed-layout contract: the dial
+            // must never move as tilt/GPS/armed state changes). At most one hint shows at a
+            // time — the pitch recall outranks the refine nudge; empty states keep the space.
+            Group {
+                if !armed, let near = nearbyPitch {
+                    // Pitch memory (Pro): you've levelled near here before — tap for the recipe.
+                    Button { shownPitch = near.pitch } label: {
+                        Label("Saved pitch nearby — \(near.pitch.siteName.isEmpty ? "tap for last time's setup" : near.pitch.siteName)",
+                              systemImage: "mappin.circle.fill")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                } else if isPhoneFlatEnough && usingRoughDefaults {
+                    Button { setupMode = .editActive; showSetup = true } label: {
                         Label("≈ estimate — set your van's size for exact figures", systemImage: "ruler")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                } else {
+                    Color.clear
                 }
             }
+            .frame(height: 22)
         }
+    }
+
+    /// The nearest saved pitch within ~250m (Pro). GPS scatter plus "roughly the same spot on the
+    /// same site" makes a tighter radius miss real returns; the sheet shows the name so a
+    /// neighbouring pitch's recipe is easy to recognise and ignore.
+    private var nearbyPitch: (pitch: PitchRecord, distance: Double)? {
+        guard isPro, let lat = location.latitude, let lon = location.longitude, !pitches.isEmpty else { return nil }
+        let scored = pitches.map { ($0, $0.distanceM(latitude: lat, longitude: lon)) }
+        guard let best = scored.min(by: { $0.1 < $1.1 }), best.1 <= 250 else { return nil }
+        return (best.0, best.1)
     }
 
     private func noticeCard(_ n: (icon: String, tint: Color, title: String, message: String, subtle: Bool),
@@ -268,9 +345,10 @@ struct LevelScanView: View {
             .overlay(Circle().stroke(target.opacity(0.6), lineWidth: 2))
 
             // Sun layer — Pro, opt-in only. Amber (never green — that read as "why is it green?").
-            if isPro && sunOn {
+            if isPro, let moment = sunMoment {
                 Circle().stroke((sunAligned ? Theme.levelGreen : Theme.sun).opacity(0.6), lineWidth: 2.5)
                     .frame(width: dialSize - 8, height: dialSize - 8)
+                sunArc(moment)
                 sunMarker
             }
 
@@ -296,23 +374,59 @@ struct LevelScanView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Opt-in sun hint — shown BELOW the dial (not overlapping it) only when the sun planner is on.
+    /// Opt-in hints — shown BELOW the dial (not overlapping it): the sun caption when the
+    /// planner's on, and a small reminder when the sleep tilt is shifting the target.
     @ViewBuilder private var sunHint: some View {
-        if isPro && sunOn {
-            Text(sunAligned ? "☀ Facing the sun — good spot" : "Turn the van until ☀ reaches the top")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
-                .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(.ultraThinMaterial, in: Capsule())
+        VStack(spacing: 5) {
+            if isPro, let moment = sunMoment {
+                Text(sunHintText(moment))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
+            if sleepHeadEnd != .off {
+                Label("Sleep tilt — \(sleepHeadEnd.label.lowercased())", systemImage: "bed.double.fill")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
         }
+    }
+
+    private func sunHintText(_ moment: SunMoment) -> String {
+        if let s = sunPosition, !s.isUp { return "Sun's below the horizon for \(moment.goal) today" }
+        if sunRel == nil { return "Finding your position…" }
+        return sunAligned ? "☀ Facing \(moment.goal) — good spot" : "Turn the van until ☀ reaches the top"
     }
 
     private var bubbleOffset: CGSize {
         let scale: CGFloat = 15
         let cap: CGFloat = 48
-        let x = min(max(CGFloat(-motion.rollDeg) * scale, -cap), cap)
-        let y = min(max(CGFloat(-motion.pitchDeg) * scale, -cap), cap)
+        // Sleep-adjusted, so the bubble centres exactly when the shifted target is met.
+        let x = min(max(CGFloat(-effRollDeg) * scale, -cap), cap)
+        let y = min(max(CGFloat(-effPitchDeg) * scale, -cap), cap)
         return CGSize(width: x, height: y)
+    }
+
+    /// The sun's whole-day path as small amber dots on the ring — each dot is "where the ☀ marker
+    /// would sit for that hour of today". Rotate the van and the whole day swings with you: park
+    /// so your chosen moment docks at the top, and you can see where the sun goes afterwards.
+    @ViewBuilder private func sunArc(_ moment: SunMoment) -> some View {
+        if let config, let cur = location.headingDeg {
+            let awningOffset = config.livingSide.awningOffsetDeg
+            ForEach(Array(sunArcAzimuths.enumerated()), id: \.offset) { _, azimuth in
+                let target = SolarPosition.vanHeadingForAwning(sunAzimuthDeg: azimuth,
+                                                               awningOffsetDeg: awningOffset,
+                                                               preference: moment.preference)
+                Circle()
+                    .fill(Theme.sun.opacity(0.45))
+                    .frame(width: 5, height: 5)
+                    .offset(y: -(dialSize / 2) + 6)
+                    .rotationEffect(.degrees(Self.signedDelta(target - Double(cur))))
+            }
+        }
     }
 
     @ViewBuilder private var sunMarker: some View {
@@ -320,7 +434,7 @@ struct LevelScanView: View {
             ZStack {
                 // Amber while you're hunting; GREEN the moment it docks at the nose = "you're now
                 // facing the sun." The green is the whole payoff — the caption below explains it.
-                Image(systemName: sunAligned ? "sun.max.fill" : "sun.max.fill")
+                Image(systemName: "sun.max.fill")
                     .font(.system(size: sunAligned ? 34 : 30))
                     .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
                     .shadow(color: (sunAligned ? Theme.levelGreen : Theme.sun).opacity(0.95), radius: sunAligned ? 10 : 7)
@@ -347,9 +461,10 @@ struct LevelScanView: View {
     }
 
     private var levelDirection: String {
+        // Sleep-adjusted: "nose high" means high relative to the (possibly shifted) target.
         var parts: [String] = []
-        if abs(motion.pitchDeg) > 0.3 { parts.append(motion.pitchDeg > 0 ? "nose high" : "nose low") }
-        if abs(motion.rollDeg) > 0.3 { parts.append(motion.rollDeg > 0 ? "left high" : "right high") }
+        if abs(effPitchDeg) > 0.3 { parts.append(effPitchDeg > 0 ? "nose high" : "nose low") }
+        if abs(effRollDeg) > 0.3 { parts.append(effRollDeg > 0 ? "left high" : "right high") }
         return parts.isEmpty ? "almost there" : parts.joined(separator: " · ")
     }
 
@@ -370,12 +485,20 @@ struct LevelScanView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(isPro ? Color.accentColor : Theme.proBadge)
             } else if !armed {
-                Button { armed = true; wasLevel = isLevel } label: {
+                Button {
+                    armed = true
+                    wasLevel = isLevel
+                    armPlan = plan   // the "recipe" — by Done the tilt reads zero, so snapshot now
+                } label: {
                     Label("Start levelling", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
             } else {
-                Button { armed = false } label: {
+                Button {
+                    let finishedLevel = isLevel
+                    armed = false
+                    if finishedLevel { maybeOfferPitchSave() } else { armPlan = nil }
+                } label: {
                     Label(isLevel ? "Done — you're level" : "Stop",
                           systemImage: isLevel ? "checkmark.circle.fill" : "xmark")
                         .font(.headline).frame(maxWidth: .infinity)
@@ -393,7 +516,11 @@ struct LevelScanView: View {
     // MARK: - Toolbar menus
 
     private var calibrateButton: some View {
-        Button { showCalibrate = true } label: {
+        Button {
+            // A Button still fires on touch-up after a long hold, so without this flag every
+            // Pro toggle would ALSO open the calibrate sheet on finger-lift.
+            if proToggleFired { proToggleFired = false } else { showCalibrate = true }
+        } label: {
             Image(systemName: motion.isCalibrated ? "scope" : "exclamationmark.triangle")
         }
         // TestFlight-only Pro preview toggle — see EntitlementStore.previewProOn. A simultaneous
@@ -402,26 +529,94 @@ struct LevelScanView: View {
         // (or verified never triggered) before submission — see the EntitlementStore doc.
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 1.5).onEnded { _ in
+                proToggleFired = true
                 entitlements.setPreviewPro(!entitlements.previewProOn)
                 Haptics.saved()
+                // If the tap never lands (finger dragged off), don't swallow the NEXT tap.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1))
+                    proToggleFired = false
+                }
             }
         )
     }
 
+    /// Sun planner presets (Pro) — one flat list: each moment pairs a time of day with the
+    /// sun/shade preference that makes sense for it.
     private var sunMenu: some View {
         Menu {
-            Button { sunOn = false } label: {
-                Label("Sun planner off", systemImage: !sunOn ? "checkmark" : "sun.max.trianglebadge.exclamationmark")
+            Button { sunMoment = nil } label: {
+                Label("Sun planner off", systemImage: sunMoment == nil ? "checkmark" : "poweroff")
             }
-            Button { sunOn = true; sunPref = .sun } label: {
-                Label("Chase the sun", systemImage: (sunOn && sunPref == .sun) ? "checkmark" : "sun.max")
-            }
-            Button { sunOn = true; sunPref = .shade } label: {
-                Label("Find the shade", systemImage: (sunOn && sunPref == .shade) ? "checkmark" : "cloud.sun")
+            Divider()
+            ForEach(SunMoment.allCases) { moment in
+                Button { sunMoment = moment } label: {
+                    Label(moment.label, systemImage: sunMoment == moment ? "checkmark" : moment.icon)
+                }
             }
         } label: {
-            Image(systemName: sunOn ? "sun.max.fill" : "sun.max")
+            Image(systemName: sunMoment != nil ? "sun.max.fill" : "sun.max")
         }
+    }
+
+    /// The gear is a menu now: switch vehicle (Pro), edit/set up, add a vehicle (Pro), sleep
+    /// setup (Pro). Free users see the locked rows — natural paywall surfaces, zero funnel cost.
+    private var gearMenu: some View {
+        Menu {
+            if isPro && allConfigs.count > 1 {
+                Section("Vehicle") {
+                    ForEach(allConfigs) { cfg in
+                        Button {
+                            cfg.updatedAt = .now   // newest updatedAt = active (no schema change)
+                            try? modelContext.save()
+                        } label: {
+                            if cfg.persistentModelID == config?.persistentModelID {
+                                Label(cfg.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(cfg.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+            Button { setupMode = .editActive; showSetup = true } label: {
+                Label(config == nil ? "Set up your van" : "Edit \(config?.displayName ?? "vehicle")",
+                      systemImage: "slider.horizontal.3")
+            }
+            if config != nil {
+                Button {
+                    if isPro { setupMode = .addNew; showSetup = true } else { showPaywall = true }
+                } label: {
+                    Label(isPro ? "Add another vehicle" : "Add another vehicle — Pro",
+                          systemImage: isPro ? "plus" : "lock.fill")
+                }
+            }
+            Divider()
+            Button {
+                if isPro { showSleepSetup = true } else { showPaywall = true }
+            } label: {
+                Label(isPro ? "Sleep setup" : "Sleep setup — Pro",
+                      systemImage: isPro ? "bed.double" : "lock.fill")
+            }
+        } label: {
+            Image(systemName: "gearshape").accessibilityLabel("Setup")
+        }
+    }
+
+    /// After a successful "Done — you're level" (Pro): offer to keep this pitch + its recipe.
+    /// Requires a REAL snapshot — if the phone was in-hand (>15° → plan nil) when Start was
+    /// tapped there is no recipe, and persisting four zero corners would tell the user next
+    /// year that this pitch "needed nothing". No snapshot → no save offer.
+    private func maybeOfferPitchSave() {
+        defer { armPlan = nil }
+        guard isPro, let recipe = armPlan,
+              let lat = location.latitude, let lon = location.longitude else { return }
+        // Wheels come back in the fixed order FL, FR, RL, RR (see LevelPlan).
+        let lifts = recipe.wheels.map { Double($0.liftMM) }
+        guard lifts.count == 4 else { return }
+        savePitchData = SavePitchData(latitude: lat, longitude: lon,
+                                      heading: location.headingDeg.map { Int($0) },
+                                      fl: lifts[0], fr: lifts[1], rl: lifts[2], rr: lifts[3])
     }
 
     #if DEBUG

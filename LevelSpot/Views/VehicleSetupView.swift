@@ -3,18 +3,24 @@ import SwiftData
 
 /// First-run / edit onboarding as a paged wizard: language → measure → sit-side → ramps → sun →
 /// calibrate. One clear thing per page, Back/Next at the bottom. The old single scrolling form is
-/// gone. Reached from the dial's gear (Pro) or the "set up your van" prompt.
+/// gone. Reached from the dial's gear menu.
 struct VehicleSetupView: View {
+    /// `.editActive` (default) prefill-and-replaces the active vehicle; `.addNew` (Pro
+    /// multi-vehicle) starts blank and inserts alongside the existing ones.
+    enum SetupMode { case editActive, addNew }
+    var mode: SetupMode = .editActive
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(MotionService.self) private var motion
-    @Environment(EntitlementStore.self) private var entitlements
-    @Query private var existingConfigs: [VehicleConfig]
+    // Newest updatedAt first — .first is the ACTIVE vehicle (matches RootView's ordering).
+    @Query(sort: \VehicleConfig.updatedAt, order: .reverse) private var existingConfigs: [VehicleConfig]
     @AppStorage("appLanguageCode") private var languageCode = "en"
 
     private let ref = ReferenceStore.shared.data
 
     @State private var step = 0
+    @State private var vehicleName = ""
     @State private var wheelbase = ""
     @State private var trackFront = ""
     @State private var trackRear = ""
@@ -22,12 +28,12 @@ struct VehicleSetupView: View {
     @State private var rampProfileId = "default"
     @State private var customSteps = [40, 70, 100]
     @State private var livingSide: LivingSide?
-    @State private var showPaywall = false
     @State private var showShop = false
     @State private var activeMeasure: MeasureTarget?
     @State private var calibrating = false
     @State private var calibCountdown = 3
     @State private var calibJustSaved = false
+    @State private var didPrefill = false
 
     private let lastStep = 5
 
@@ -60,11 +66,12 @@ struct VehicleSetupView: View {
         .navigationTitle("Set up")
         .navigationBarTitleDisplayMode(.inline)
         .animation(.snappy, value: step)
-        .sheet(isPresented: $showPaywall) { PaywallSheet() }
         .sheet(isPresented: $showShop) { RampShopSheet(neededMM: nil) }
         .fullScreenCover(item: $activeMeasure) { target in
             ARMeasureView(kind: target.kind) { mm in applyMeasurement(target, mm) }
         }
+        // onAppear fires AGAIN when the AR-measure fullScreenCover dismisses — prefill must run
+        // once, or it wipes the value the camera just measured (didPrefill guards it).
         .onAppear { motion.start(); prefillFromExisting() }
     }
 
@@ -126,6 +133,19 @@ struct VehicleSetupView: View {
         ScrollView {
             VStack(spacing: 18) {
                 stepHeader("Measure your van", "No make or model needed — just two measurements, so LevelSpot works for any vehicle, anywhere.")
+                VStack(alignment: .leading, spacing: 8) {
+                    LabeledContent("Vehicle name") {
+                        TextField(mode == .addNew ? "e.g. The caravan" : "My van", text: $vehicleName)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Text(mode == .addNew
+                         ? "Give it a name you'll recognise in the vehicle switcher."
+                         : "Shown in the vehicle switcher if you add more vehicles (Pro).")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .padding()
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal)
                 measureField(diagram: AnyView(VanPhoto("VanSide", fallback: AnyView(WheelbaseDiagram()))),
                              label: "Wheelbase (mm)", placeholder: "e.g. 3400",
                              text: $wheelbase, target: .wheelbase,
@@ -384,7 +404,10 @@ struct VehicleSetupView: View {
 
     private func finish() {
         guard let side = livingSide, let config = buildConfig(side: side) else { return }
-        for old in existingConfigs { modelContext.delete(old) }
+        // Edit replaces only the ACTIVE vehicle; adding (Pro multi-vehicle) keeps the rest.
+        if mode == .editActive, let active = existingConfigs.first {
+            modelContext.delete(active)
+        }
         modelContext.insert(config)
         dismiss()
     }
@@ -392,7 +415,10 @@ struct VehicleSetupView: View {
     private func buildConfig(side: LivingSide) -> VehicleConfig? {
         guard let wb = Int(wheelbase), let front = Int(trackFront) else { return nil }
         let rear = rearDiffers ? (Int(trackRear) ?? front) : front
-        return VehicleConfig(presetId: nil, genId: nil, displayName: "My van",
+        let trimmedName = vehicleName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackName = mode == .addNew ? "Vehicle \(existingConfigs.count + 1)" : "My van"
+        return VehicleConfig(presetId: nil, genId: nil,
+                             displayName: trimmedName.isEmpty ? fallbackName : trimmedName,
                              wheelbaseMM: wb, trackFrontMM: front, trackRearMM: rear,
                              chassisKind: .measured, livingSide: side,
                              rampProfileId: rampProfileId, customStepsMM: customSteps,
@@ -400,7 +426,10 @@ struct VehicleSetupView: View {
     }
 
     private func prefillFromExisting() {
-        guard let existing = existingConfigs.first else { return }
+        guard !didPrefill else { return }
+        didPrefill = true
+        guard mode == .editActive, let existing = existingConfigs.first else { return }
+        vehicleName = existing.displayName
         wheelbase = String(existing.wheelbaseMM)
         trackFront = String(existing.trackFrontMM)
         if existing.trackRearMM != existing.trackFrontMM {
