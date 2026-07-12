@@ -22,19 +22,15 @@ struct PaywallSheet: View {
                     .accessibilityHidden(true)
 
                 Text("LevelSpot Pro").font(.title2.weight(.bold))
-                Text("Turn the bubble level into a full levelling coach.")
+                Text("Two extras for the fussy pitch.")
                     .font(.subheadline).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
                 VStack(alignment: .leading, spacing: 16) {
-                    benefit("waveform", "Audio levelling",
-                            "Drive up and level by ear — no watching the screen over the engine.")
-                    benefit("arrow.up.to.line.compact", "Ramp coaching",
-                            "Exactly which ramp, which wheel — and an honest \"you can't level here\" when the ground's too steep.")
-                    benefit("ruler", "Measure your van",
-                            "Wheelbase & track with the camera, so the ramp maths fits your vehicle.")
                     benefit("sun.max.fill", "Sun & shade planner",
                             "Face the van the right way for sun — or shade — under your awning.")
+                    benefit("scope", "Guided air-ramp levelling",
+                            "Step-by-step wheel-by-wheel targets for air bags, blocks & ratchet levellers.")
                 }
                 .padding(.horizontal, 4)
 
@@ -93,8 +89,8 @@ struct PaywallSheet: View {
     }
 }
 
-/// A static, non-interactive rendering of the Pro dial for the paywall — the amber sun ring and
-/// green "levelled" lock that the free targeting dial doesn't show.
+/// A static, non-interactive rendering of the Pro dial for the paywall — the amber sun ring
+/// (the sun & shade planner) that the free targeting dial doesn't show.
 private struct ProPreviewDial: View {
     var body: some View {
         ZStack {

@@ -2,13 +2,15 @@ import SwiftUI
 import LevelSpotCore
 
 /// The one screen.
-/// FREE = a simple targeting bubble level: the dial + degrees + LEVEL state + calibrate. No setup.
-/// PRO unlocks the sun ring, ramp coaching (drive-up targets + honest can't-level maths) and audio
-/// levelling. Fixed layout: the dial never moves and every text zone is a constant-height slot, so
-/// nothing jumps as the tilt crosses thresholds.
+/// FREE = the bubble level, calibrate, drive-up ramp coaching (honest can't-level maths, rough
+/// default geometry until the van is set up), the affiliate shop and the audio chime — the whole
+/// revenue path is free so every user reaches the "buy ramps that reach it" moment.
+/// PRO = the two comfort features: the sun & shade planner, and the guided wheel-by-wheel flow
+/// for air/blocks/ratchet levellers. Fixed layout: the dial never moves and every text zone is a
+/// constant-height slot, so nothing jumps as the tilt crosses thresholds.
 struct LevelScanView: View {
-    /// nil for a free user, or a Pro user who hasn't set their van up yet. Only the Pro ramp/sun
-    /// features need it — the basic level works off the motion sensor alone.
+    /// nil until the van is set up — ramp coaching still works via rough-default geometry, and
+    /// the sun planner needs a real `livingSide`, so it stays Pro + configured.
     let config: VehicleConfig?
 
     @Environment(MotionService.self) private var motion
@@ -40,17 +42,43 @@ struct LevelScanView: View {
     private var degOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
     private var isLevel: Bool { degOff < levelTolDeg }
 
-    /// Pro ramp plan — nil for free users or before the van is set up.
+    // Rough-default geometry — ramp coaching is FREE and works with zero setup. 1800mm track
+    // matches the dominant Ducato/Boxer/Transit base; 3500mm wheelbase sits at the centre of
+    // common L2/L3 panel-van conversions. The whole-vehicle-range error at a typical tilt is
+    // smaller than the gap between ramp steps, so a generic default rarely changes which ramp
+    // you'd actually buy — validated 2026-07-12.
+    private static let roughWheelbaseMM = 3500.0
+    private static let roughTrackMM = 1800.0
+    private static let roughRampSet = RampSet(kind: .stepped, stepsMM: [40, 70, 100], maxLiftMM: 100, incrementMM: 0)
+
+    /// True whenever we're coaching off the generic default rather than the user's own van —
+    /// drives the "≈" prefix on mm figures and the subtle "refine" affordance.
+    private var usingRoughDefaults: Bool { config == nil }
+
+    private var effectiveRampSet: RampSet { config?.activeRampSet ?? Self.roughRampSet }
+
+    /// Above ~15° the phone isn't lying flat in the van — it's just being held (checking the
+    /// app, walking around). There's no real levelling scenario past this, so don't compute a
+    /// giant, bug-looking mm figure — tell the user to lay it flat instead.
+    private var isPhoneFlatEnough: Bool { degOff <= 15 }
+
+    /// Ramp plan — free for everyone. Uses the van's real geometry once set up, otherwise the
+    /// rough defaults above so coaching works from first launch with zero setup.
     private var plan: LevelPlan? {
-        guard isPro, let config else { return nil }
+        guard isPhoneFlatEnough else { return nil }
+        let wheelbase = config.map { Double($0.wheelbaseMM) } ?? Self.roughWheelbaseMM
+        let trackFront = config.map { Double($0.trackFrontMM) } ?? Self.roughTrackMM
+        let trackRear = config.map { Double($0.trackRearMM) } ?? Self.roughTrackMM
         return RampAdvisor.plan(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
-                                trackFrontMM: Double(config.trackFrontMM), trackRearMM: Double(config.trackRearMM),
-                                wheelbaseMM: Double(config.wheelbaseMM),
-                                ramp: config.activeRampSet, tolerance: .comfort)
+                                trackFrontMM: trackFront, trackRearMM: trackRear,
+                                wheelbaseMM: wheelbase,
+                                ramp: effectiveRampSet, tolerance: .comfort)
     }
 
-    /// Ramps you set wheel-by-wheel (inflatables, blocks, ratchets) use the guided per-wheel flow.
-    private var usesPerWheelFlow: Bool { config?.activeRampSet.kind.isPerWheel ?? false }
+    /// Ramps you set wheel-by-wheel (inflatables, blocks, ratchets) use the guided per-wheel
+    /// flow. Only true once a ramp profile is actually configured — the rough default is
+    /// always a stepped set, so free/unset-up users get the drive-up flow, not this one.
+    private var usesPerWheelFlow: Bool { effectiveRampSet.kind.isPerWheel }
 
     private var eveningDate: Date { Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: Date()) ?? Date() }
     private var eveningSun: SunPosition? {
@@ -76,7 +104,7 @@ struct LevelScanView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            if isPro { noticeZone }
+            noticeZone
             dial
             sunHint
             levelStatus
@@ -90,11 +118,12 @@ struct LevelScanView: View {
         .safeAreaInset(edge: .bottom) { bottomBar }
         .onAppear {
             motion.start()
-            if isPro { audio.start(); location.requestAndStart() }   // audio + sun are Pro-only
+            audio.start()                                  // audio is free now
+            if isPro { location.requestAndStart() }         // sun planner stays Pro-only
         }
         .onDisappear { motion.stop(); audio.stop() }
         .onChange(of: isLevel) { _, nowLevel in
-            if nowLevel && !wasLevel && armed && isPro { Haptics.levelReached(); audio.alertLevel() }
+            if nowLevel && !wasLevel && armed { Haptics.levelReached(); audio.alertLevel() }
             wasLevel = nowLevel
         }
         .sheet(isPresented: $showCalibrate) { CalibrateView() }
@@ -106,8 +135,8 @@ struct LevelScanView: View {
         .navigationDestination(isPresented: $showSetup) { VehicleSetupView() }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { if isPro { showSetup = true } else { showPaywall = true } } label: {
-                    Image(systemName: "gearshape").accessibilityLabel(isPro ? "Setup" : "Unlock Pro")
+                Button { showSetup = true } label: {
+                    Image(systemName: "gearshape").accessibilityLabel("Setup")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) { calibrateButton }
@@ -120,30 +149,39 @@ struct LevelScanView: View {
         }
     }
 
-    // MARK: - Notice zone (Pro only — fixed height coach line)
+    // MARK: - Notice zone (free for everyone — the ramp/affiliate coaching lives here)
 
     @ViewBuilder private var noticeZone: some View {
-        if let config, let plan {
-            if !plan.canLevel {
-                // Can't level here → tap through to the shop (ramps that actually reach the height).
-                Button {
-                    shopNeededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
-                    showRampShop = true
-                } label: {
-                    noticeCard(rampNotice(plan, config), tappable: true)
+        VStack(spacing: 6) {
+            if !isPhoneFlatEnough {
+                // Not actually resting flat in the van (being held/checked) — an mm figure here
+                // would be nonsense (see the sanity clamp in `plan`), so ask for a flat read instead.
+                noticeCard(("iphone.gen3.radiowaves.left.and.right", Color(.secondaryLabel), "Lay the phone flat",
+                            "Rest it flat in the van, screen up, to read the ground's slope.", true),
+                           tappable: false)
+            } else if let plan {
+                if !plan.canLevel {
+                    // Can't level here → tap through to the shop (ramps that actually reach the height).
+                    Button {
+                        shopNeededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
+                        showRampShop = true
+                    } label: {
+                        noticeCard(rampNotice(plan), tappable: true)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    noticeCard(rampNotice(plan), tappable: false)
                 }
-                .buttonStyle(.plain)
-            } else {
-                noticeCard(rampNotice(plan, config), tappable: false)
+
+                if usingRoughDefaults {
+                    Button { showSetup = true } label: {
+                        Label("≈ estimate — set your van's size for exact figures", systemImage: "ruler")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-        } else {
-            // Pro, but the van isn't set up yet — ramp coaching needs the dimensions.
-            Button { showSetup = true } label: {
-                noticeCard(("slider.horizontal.3", Theme.needsRamp, "Set up your van",
-                            "Add your wheelbase, track & ramps to get drive-up ramp coaching.", false),
-                           tappable: true)
-            }
-            .buttonStyle(.plain)
         }
     }
 
@@ -167,13 +205,17 @@ struct LevelScanView: View {
                     in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private func rampNotice(_ plan: LevelPlan, _ config: VehicleConfig)
+    private func rampNotice(_ plan: LevelPlan)
         -> (icon: String, tint: Color, title: String, message: String, subtle: Bool) {
-        let ceiling = config.activeRampSet.ceilingMM
+        let ceiling = effectiveRampSet.ceilingMM
         let neededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
+        // "≈" flags a rough-default figure honestly; "~" just marks the normal rounding once
+        // the van's real size is known.
+        let approx = usingRoughDefaults ? "≈" : "~"
         if !plan.canLevel {
-            return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "You'll never level here",
-                    "Needs ~\(neededMM)mm but your ramps reach \(ceiling)mm. Tap for ramps that reach it — or move / add packing.", false)
+            // Calm, non-scolding copy — a stressed user reads this right before the Buy tap.
+            return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "This spot's too steep for your ramps",
+                    "Reposition, or ramps that reach \(approx)\(neededMM)mm (yours reach \(ceiling)mm).", false)
         }
         if isLevel {
             return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it.", false)
@@ -181,7 +223,7 @@ struct LevelScanView: View {
         // Wheel-by-wheel aids (inflatables / blocks / ratchets): place, then start the guided flow.
         if usesPerWheelFlow {
             let noun: String = {
-                switch config.activeRampSet.kind {
+                switch effectiveRampSet.kind {
                 case .inflatable: return "air bags"
                 case .blocks: return "blocks"
                 default: return "levellers"
@@ -194,7 +236,7 @@ struct LevelScanView: View {
         if !armed {
             let wheels = plan.ramps.map { $0.wheelName }.joined(separator: " & ")
             let step = plan.ramps.map { $0.stepMM ?? 0 }.max() ?? 0
-            return ("arrow.up.circle.fill", Theme.needsRamp, "Ramp \(wheels) · ~\(step)mm",
+            return ("arrow.up.circle.fill", Theme.needsRamp, "Ramp \(wheels) · \(approx)\(step)mm",
                     "Drop your ramps in front of those wheels, then tap Start.", false)
         }
         return ("waveform", Color(.secondaryLabel), "Drive up slowly",
@@ -315,17 +357,18 @@ struct LevelScanView: View {
 
     @ViewBuilder private var bottomBar: some View {
         Group {
-            if !isPro {
-                Button { showPaywall = true } label: {
-                    Label("Unlock Pro — ramps, sun & audio", systemImage: "lock.fill")
+            if usesPerWheelFlow {
+                // Air/blocks/ratchet ramps are the one Pro gate — it sits at this exact tap,
+                // not in front of the free coaching that got the user here.
+                Button {
+                    if isPro { showInflateGuide = true } else { showPaywall = true }
+                } label: {
+                    Label(isPro ? "Level wheel by wheel" : "Level wheel by wheel — Pro",
+                          systemImage: isPro ? "scope" : "lock.fill")
                         .font(.headline).frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent).tint(Theme.proBadge)
-            } else if usesPerWheelFlow {
-                Button { showInflateGuide = true } label: {
-                    Label("Level wheel by wheel", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)
-                }
                 .buttonStyle(.borderedProminent)
+                .tint(isPro ? Color.accentColor : Theme.proBadge)
             } else if !armed {
                 Button { armed = true; wasLevel = isLevel } label: {
                     Label("Start levelling", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)

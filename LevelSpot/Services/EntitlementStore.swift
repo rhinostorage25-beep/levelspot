@@ -23,11 +23,13 @@ final class EntitlementStore {
     /// ⚠️ TEMPORARY TESTFLIGHT LEVER. Applies in Release (unlike the DEBUG toggle below).
     /// - `true`  → forces every Pro surface ON (demo the Pro app; the `uk.co.levelspot.pro`
     ///            product doesn't exist yet so a real purchase can't transact).
-    /// - `false` → shows the FREE tier + paywall (what this build is for). Pro features stay
-    ///            locked until the IAP product exists in App Store Connect.
+    /// - `false` → shows the FREE tier (the whole revenue path — ramp coaching + the
+    ///            affiliate shop — is free now; only the sun planner + guided air-ramp flow
+    ///            stay behind the paywall).
     /// **MUST be `false` before the App Store submission** either way — see the memory note.
-    /// Currently `true` to test the Pro ramp coaching + inflatable per-wheel flow on TestFlight.
-    static let forceProForTesting = true
+    /// `false` post funnel-flip so TestFlight shows the real free funnel; use the DEBUG
+    /// toggle (Sim menu) to exercise the two Pro surfaces locally.
+    static let forceProForTesting = false
 
     private(set) var isPro = forceProForTesting
     private(set) var proProduct: Product?
