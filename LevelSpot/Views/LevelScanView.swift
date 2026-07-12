@@ -18,10 +18,8 @@ struct LevelScanView: View {
     @Environment(MotionService.self) private var motion
     @Environment(LocationService.self) private var location
     @Environment(EntitlementStore.self) private var entitlements
-    @Environment(\.modelContext) private var modelContext
 
-    // Pro pack data: every vehicle (newest updatedAt = active) and the saved pitches.
-    @Query(sort: \VehicleConfig.updatedAt, order: .reverse) private var allConfigs: [VehicleConfig]
+    // Pro pack data: the saved pitches (vehicles live in SettingsSheet's own query now).
     @Query private var pitches: [PitchRecord]
     // Sleep tilt — where the bed's head end is. Free tier ignores the stored value.
     @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
@@ -34,10 +32,14 @@ struct LevelScanView: View {
     @State private var showCalibrate = false
     @State private var showSetup = false
     @State private var setupMode: VehicleSetupView.SetupMode = .editActive
+    @State private var setupStart: Int?
+    @State private var showSettings = false
+    @State private var pendingSettings: SettingsAction?
     @State private var showPaywall = false
     @State private var showInflateGuide = false
     @State private var showRampShop = false
-    @State private var showSleepSetup = false
+    @State private var showPitchTeaser = false   // free tier: the "Pro would remember this" moment
+    @State private var pitchTeaserShown = false  // once per session — a tease, not a nag
     @State private var savePitchData: SavePitchData?
     @State private var shownPitch: PitchRecord?
     @State private var shopNeededMM: Int?
@@ -169,28 +171,63 @@ struct LevelScanView: View {
             if isPro { location.requestAndStart() }         // sun planner + pitch memory are Pro-only
             recomputeSunArc()
         }
-        .onDisappear { motion.stop(); audio.stop() }
+        // Deliberately NOT stopping motion here: the only push destination is the setup wizard,
+        // whose calibrate step needs live readings — and push ordering can fire the wizard's
+        // onAppear BEFORE our onDisappear, so a stop() here could freeze the wizard's motion
+        // and let Re-calibrate bake a stale offset. Backgrounding suspends CoreMotion anyway.
+        .onDisappear { audio.stop() }
         .onChange(of: isLevel) { _, nowLevel in
             if nowLevel && !wasLevel && armed { Haptics.levelReached(); audio.alertLevel() }
             wasLevel = nowLevel
         }
         .onChange(of: sunMoment) { recomputeSunArc() }
         .onChange(of: location.latitude) { recomputeSunArc() }   // the first GPS fix arrives async
+        .onChange(of: isPro) { _, pro in
+            // Mid-session upgrade (purchase or the TestFlight preview toggle): onAppear already
+            // ran, so start location NOW or the just-bought sun planner sits at "Finding your
+            // position…" until the next launch.
+            if pro { location.requestAndStart() }
+        }
         .sheet(isPresented: $showCalibrate) { CalibrateView() }
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
         .sheet(isPresented: $showRampShop) { RampShopSheet(neededMM: shopNeededMM) }
-        .sheet(isPresented: $showSleepSetup) { SleepSetupSheet() }
+        // Settings actions (wizard push / paywall) run AFTER the sheet is gone, so the
+        // navigation push never races the sheet dismissal.
+        .sheet(isPresented: $showSettings, onDismiss: runPendingSettingsAction) {
+            SettingsSheet(isPro: isPro) { pendingSettings = $0 }
+        }
         .sheet(item: $savePitchData) { data in SavePitchSheet(data: data) }
         .sheet(item: $shownPitch) { pitch in PitchDetailSheet(pitch: pitch) }
         .fullScreenCover(isPresented: $showInflateGuide) {
             if let config { InflationGuideView(config: config) }
         }
-        .navigationDestination(isPresented: $showSetup) { VehicleSetupView(mode: setupMode) }
+        .navigationDestination(isPresented: $showSetup) {
+            VehicleSetupView(mode: setupMode, startStep: setupStart)
+        }
+        // The free "why buy Pro" moment — offered exactly when Pro would have helped.
+        .confirmationDialog(
+            "Nice — you're level. Pro remembers this pitch and hands you the exact ramp recipe next time you're back.",
+            isPresented: $showPitchTeaser, titleVisibility: .visible
+        ) {
+            Button("See what Pro does") { showPaywall = true }
+            Button("Not now", role: .cancel) {}
+        }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { gearMenu }
+            ToolbarItem(placement: .topBarLeading) {
+                Button { showSettings = true } label: {
+                    Image(systemName: "gearshape").accessibilityLabel("Settings")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) { calibrateButton }
-            if isPro {
-                ToolbarItem(placement: .topBarTrailing) { sunMenu }
+            ToolbarItem(placement: .topBarTrailing) {
+                if isPro {
+                    sunMenu
+                } else {
+                    // Visible for free — the sun planner shouldn't be a secret. Tap = paywall.
+                    Button { showPaywall = true } label: {
+                        Image(systemName: "sun.max").accessibilityLabel("Sun & shade planner — Pro")
+                    }
+                }
             }
             #if DEBUG
             ToolbarItem(placement: .topBarTrailing) { simulateMenu }
@@ -238,7 +275,9 @@ struct LevelScanView: View {
                     }
                     .buttonStyle(.plain)
                 } else if isPhoneFlatEnough && usingRoughDefaults {
-                    Button { setupMode = .editActive; showSetup = true } label: {
+                    // Straight to the measure step — no vehicle exists yet, but nobody needs
+                    // the language page to type two numbers.
+                    Button { setupMode = .firstRun; setupStart = 1; showSetup = true } label: {
                         Label("≈ estimate — set your van's size for exact figures", systemImage: "ruler")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
@@ -396,9 +435,21 @@ struct LevelScanView: View {
     }
 
     private func sunHintText(_ moment: SunMoment) -> String {
-        if let s = sunPosition, !s.isUp { return "Sun's below the horizon for \(moment.goal) today" }
+        if let s = sunPosition, !s.isUp {
+            // Only really reachable for "Sun now" at night — the timed presets roll forward
+            // to tomorrow (bySettingHour searches ahead), which is what an overnight parker wants.
+            return moment == .now
+                ? "Sun's set — pick Morning sun to plan tomorrow's pitch"
+                : "Sun's below the horizon for \(moment.goal)"
+        }
         if sunRel == nil { return "Finding your position…" }
-        return sunAligned ? "☀ Facing \(moment.goal) — good spot" : "Turn the van until ☀ reaches the top"
+        // If the preset's time already passed today, we're planning TOMORROW's sun — say so.
+        let planningTomorrow = moment != .now && !Calendar.current.isDateInToday(moment.date())
+        let goal = planningTomorrow ? "tomorrow's \(moment.goal)" : moment.goal
+        if sunAligned { return "☀ Facing \(goal) — good spot" }
+        return moment == .now
+            ? "Turn the van until ☀ reaches the top"
+            : "Turn the van until ☀ reaches the top — \(goal)"
     }
 
     private var bubbleOffset: CGSize {
@@ -497,7 +548,22 @@ struct LevelScanView: View {
                 Button {
                     let finishedLevel = isLevel
                     armed = false
-                    if finishedLevel { maybeOfferPitchSave() } else { armPlan = nil }
+                    if finishedLevel {
+                        if isPro {
+                            maybeOfferPitchSave()
+                        } else {
+                            // The one Pro tease on the free path — at the exact moment pitch
+                            // memory would have earned its keep. Dismissible, shown at most
+                            // once per session, zero cost to the funnel.
+                            armPlan = nil
+                            if !pitchTeaserShown {
+                                pitchTeaserShown = true
+                                showPitchTeaser = true
+                            }
+                        }
+                    } else {
+                        armPlan = nil
+                    }
                 } label: {
                     Label(isLevel ? "Done — you're level" : "Stop",
                           systemImage: isLevel ? "checkmark.circle.fill" : "xmark")
@@ -559,47 +625,17 @@ struct LevelScanView: View {
         }
     }
 
-    /// The gear is a menu now: switch vehicle (Pro), edit/set up, add a vehicle (Pro), sleep
-    /// setup (Pro). Free users see the locked rows — natural paywall surfaces, zero funnel cost.
-    private var gearMenu: some View {
-        Menu {
-            if isPro && allConfigs.count > 1 {
-                Section("Vehicle") {
-                    ForEach(allConfigs) { cfg in
-                        Button {
-                            cfg.updatedAt = .now   // newest updatedAt = active (no schema change)
-                            try? modelContext.save()
-                        } label: {
-                            if cfg.persistentModelID == config?.persistentModelID {
-                                Label(cfg.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(cfg.displayName)
-                            }
-                        }
-                    }
-                }
-            }
-            Button { setupMode = .editActive; showSetup = true } label: {
-                Label(config == nil ? "Set up your van" : "Edit \(config?.displayName ?? "vehicle")",
-                      systemImage: "slider.horizontal.3")
-            }
-            if config != nil {
-                Button {
-                    if isPro { setupMode = .addNew; showSetup = true } else { showPaywall = true }
-                } label: {
-                    Label(isPro ? "Add another vehicle" : "Add another vehicle — Pro",
-                          systemImage: isPro ? "plus" : "lock.fill")
-                }
-            }
-            Divider()
-            Button {
-                if isPro { showSleepSetup = true } else { showPaywall = true }
-            } label: {
-                Label(isPro ? "Sleep setup" : "Sleep setup — Pro",
-                      systemImage: isPro ? "bed.double" : "lock.fill")
-            }
-        } label: {
-            Image(systemName: "gearshape").accessibilityLabel("Setup")
+    /// Runs whatever a Settings row asked for, once the sheet is fully gone.
+    private func runPendingSettingsAction() {
+        guard let action = pendingSettings else { return }
+        pendingSettings = nil
+        switch action {
+        case .openWizard(let mode, let startStep):
+            setupMode = mode
+            setupStart = startStep
+            showSetup = true
+        case .paywall:
+            showPaywall = true
         }
     }
 

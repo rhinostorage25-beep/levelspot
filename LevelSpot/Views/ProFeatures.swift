@@ -107,50 +107,173 @@ enum SleepHeadEnd: String, CaseIterable, Identifiable {
     }
 }
 
-/// Pro sheet: pick the bed's head end. Persisted app-wide (applies to the active vehicle).
-struct SleepSetupSheet: View {
+// MARK: - Settings (the gear — ONE tap to everything)
+
+/// What a Settings row wants the Level screen to do after the sheet closes. Runs from the
+/// sheet's onDismiss so the navigation push / paywall never races the sheet's dismissal.
+enum SettingsAction {
+    case openWizard(VehicleSetupView.SetupMode, startStep: Int)
+    case paywall
+}
+
+/// The gear's ONE-TAP settings screen. Everything actionable is either done right here
+/// (switch vehicle, sleep tilt, language) or one row-tap away at the exact wizard step
+/// (measurements / awning side / ramps) — the full six-step wizard only runs on first
+/// setup or when adding a vehicle. Free users see the locked Pro rows: honest upsell.
+struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \VehicleConfig.updatedAt, order: .reverse) private var vehicles: [VehicleConfig]
     @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
+    @AppStorage("appLanguageCode") private var languageCode = "en"
+
+    let isPro: Bool
+    let onAction: (SettingsAction) -> Void
+
+    private let languages: [(code: String, name: String, flag: String)] = [
+        ("en", "English", "🇬🇧"), ("de", "Deutsch", "🇩🇪"), ("fr", "Français", "🇫🇷"),
+        ("it", "Italiano", "🇮🇹"), ("es", "Español", "🇪🇸"), ("nl", "Nederlands", "🇳🇱"),
+    ]
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                HStack {
-                    Spacer()
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark").foregroundStyle(.secondary)
-                    }
-                }
-                Image(systemName: "bed.double.fill")
-                    .font(.system(size: 44)).foregroundStyle(Color.accentColor)
-                Text("Sleep setup").font(.title2.weight(.bold))
-                Text("Nobody sleeps well feet-up. Tell LevelSpot where the bed's head end is and the level target tilts half a degree that way — about 15mm over a 2m bed. Still well within fridge-safe.")
-                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-
-                VStack(spacing: 10) {
-                    ForEach(SleepHeadEnd.allCases) { end in
-                        Button { sleepHeadEndRaw = end.rawValue } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: end.icon)
-                                    .foregroundStyle(Color.accentColor).frame(width: 26)
-                                Text(end.label).font(.body).foregroundStyle(.primary)
-                                Spacer()
-                                if sleepHeadEndRaw == end.rawValue {
-                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
-                                }
-                            }
-                            .padding(14)
-                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                Text("The dial, degrees and ramp coaching all aim at the shifted target — level as usual and the tilt is built in.")
-                    .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+        NavigationStack {
+            List {
+                vehicleSection
+                sleepSection
+                languageSection
             }
-            .padding(24)
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+            }
         }
         .presentationDetents([.large])
+    }
+
+    // MARK: Vehicle
+
+    @ViewBuilder private var vehicleSection: some View {
+        if vehicles.isEmpty {
+            Section {
+                Button { act(.openWizard(.firstRun, startStep: 0)) } label: {
+                    Label("Set up your van", systemImage: "car")
+                }
+            } footer: {
+                Text("Two measurements and your ramps — unlocks exact figures instead of ≈ estimates.")
+            }
+        } else {
+            Section("Vehicle") {
+                // Switcher (Pro adds more vehicles; switching is instant, right here).
+                // Display order is alphabetical and STABLE — the query sorts by updatedAt,
+                // and switching touches updatedAt, so iterating the query directly would
+                // reshuffle the rows under the user's finger. Active still = query's first.
+                ForEach(vehicles.sorted(by: { $0.displayName < $1.displayName })) { v in
+                    Button {
+                        v.updatedAt = .now   // newest updatedAt = active (no schema change)
+                        try? modelContext.save()
+                    } label: {
+                        HStack {
+                            Text(v.displayName).foregroundStyle(.primary)
+                            Spacer()
+                            if v.persistentModelID == vehicles.first?.persistentModelID {
+                                Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                            }
+                        }
+                    }
+                }
+                Button {
+                    if isPro { act(.openWizard(.addNew, startStep: 1)) } else { act(.paywall) }
+                } label: {
+                    Label(isPro ? "Add another vehicle" : "Add another vehicle — Pro",
+                          systemImage: isPro ? "plus" : "lock.fill")
+                }
+            }
+            if let active = vehicles.first {
+                Section("Edit \(active.displayName)") {
+                    // Deep links: straight to the RIGHT wizard step — no six-step march.
+                    settingsRow("ruler", "Size & measurements",
+                                "\(active.wheelbaseMM)mm wheelbase · \(active.trackFrontMM)mm track") {
+                        act(.openWizard(.editActive, startStep: 1))
+                    }
+                    settingsRow("beach.umbrella", "Awning side", active.livingSide.label) {
+                        act(.openWizard(.editActive, startStep: 2))
+                    }
+                    settingsRow("arrow.up.to.line.compact", "Ramps", rampName(active)) {
+                        act(.openWizard(.editActive, startStep: 3))
+                    }
+                }
+            }
+        }
+    }
+
+    private func rampName(_ config: VehicleConfig) -> String {
+        config.rampProfileId == "custom"
+            ? "Custom steps"
+            : ReferenceStore.shared.rampProfile(id: config.rampProfileId)?.name ?? "Generic 3-step"
+    }
+
+    private func settingsRow(_ icon: String, _ title: String, _ value: String,
+                             action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Label(title, systemImage: icon).foregroundStyle(.primary)
+                Spacer()
+                Text(value).font(.footnote).foregroundStyle(.secondary)
+                Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    // MARK: Sleep (inline — two taps, not a buried sheet)
+
+    @ViewBuilder private var sleepSection: some View {
+        Section {
+            if isPro {
+                Picker(selection: $sleepHeadEndRaw) {
+                    ForEach(SleepHeadEnd.allCases) { end in
+                        Text(end.label).tag(end.rawValue)
+                    }
+                } label: {
+                    Label("Sleep tilt", systemImage: "bed.double.fill")
+                }
+                .pickerStyle(.menu)
+            } else {
+                Button { act(.paywall) } label: {
+                    HStack {
+                        Label("Sleep tilt — Pro", systemImage: "lock.fill").foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        } header: {
+            Text("Comfort")
+        } footer: {
+            Text("Tilts the level target half a degree toward your pillow (~15mm over a 2m bed) — the dial, degrees and ramp coaching all aim at it. Still fridge-safe.")
+        }
+    }
+
+    // MARK: Language
+
+    private var languageSection: some View {
+        Section {
+            Picker(selection: $languageCode) {
+                ForEach(languages, id: \.code) { lang in
+                    Text("\(lang.flag)  \(lang.name)").tag(lang.code)
+                }
+            } label: {
+                Label("Language", systemImage: "globe")
+            }
+            .pickerStyle(.menu)
+        } footer: {
+            Text("The app is in English for now — the other languages are coming soon.")
+        }
+    }
+
+    private func act(_ action: SettingsAction) {
+        onAction(action)
+        dismiss()
     }
 }
 

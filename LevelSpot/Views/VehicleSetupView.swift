@@ -5,10 +5,21 @@ import SwiftData
 /// calibrate. One clear thing per page, Back/Next at the bottom. The old single scrolling form is
 /// gone. Reached from the dial's gear menu.
 struct VehicleSetupView: View {
-    /// `.editActive` (default) prefill-and-replaces the active vehicle; `.addNew` (Pro
-    /// multi-vehicle) starts blank and inserts alongside the existing ones.
-    enum SetupMode { case editActive, addNew }
-    var mode: SetupMode = .editActive
+    /// `.firstRun` = the full six-step onboarding (language included). `.editActive`
+    /// prefill-and-replaces the active vehicle and SKIPS the language step (language lives in
+    /// Settings now); Settings rows deep-link it to a specific step via `startStep`.
+    /// `.addNew` (Pro multi-vehicle) starts blank at the measure step and inserts alongside.
+    enum SetupMode { case firstRun, editActive, addNew }
+    let mode: SetupMode
+    /// The earliest step this run can reach (0 for first-run, else 1 — no language step).
+    private let firstStep: Int
+
+    init(mode: SetupMode = .editActive, startStep: Int? = nil) {
+        self.mode = mode
+        let base = mode == .firstRun ? 0 : 1
+        self.firstStep = base
+        _step = State(initialValue: min(max(startStep ?? base, base), 5))
+    }
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -19,7 +30,7 @@ struct VehicleSetupView: View {
 
     private let ref = ReferenceStore.shared.data
 
-    @State private var step = 0
+    @State private var step: Int
     @State private var vehicleName = ""
     @State private var wheelbase = ""
     @State private var trackFront = ""
@@ -46,7 +57,9 @@ struct VehicleSetupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            progressDots
+            // Edits are single-page (deep-linked from Settings) — dots only make sense
+            // when there's an actual journey.
+            if mode != .editActive { progressDots }
             Group {
                 switch step {
                 case 0: languageStep
@@ -77,7 +90,7 @@ struct VehicleSetupView: View {
 
     private var progressDots: some View {
         HStack(spacing: 8) {
-            ForEach(0...lastStep, id: \.self) { i in
+            ForEach(firstStep...lastStep, id: \.self) { i in
                 Capsule()
                     .fill(i == step ? Color.accentColor : Color(.tertiaryLabel))
                     .frame(width: i == step ? 22 : 8, height: 8)
@@ -101,7 +114,7 @@ struct VehicleSetupView: View {
     private var languageStep: some View {
         ScrollView {
             VStack(spacing: 14) {
-                stepHeader("Choose your language", "You can change this any time in Set up.")
+                stepHeader("Choose your language", "You can change this any time in Settings.")
                 VStack(spacing: 10) {
                     ForEach(languages, id: \.code) { lang in
                         Button { languageCode = lang.code } label: {
@@ -348,6 +361,9 @@ struct VehicleSetupView: View {
             }
             .padding(.vertical)
         }
+        // Belt-and-braces: if anything upstream stopped device motion, restart it here — a
+        // Re-calibrate against frozen readings would bake a wrong offset into UserDefaults.
+        .onAppear { motion.start() }
     }
 
     private var calibDegOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
@@ -373,15 +389,24 @@ struct VehicleSetupView: View {
 
     private var navBar: some View {
         HStack(spacing: 12) {
-            if step > 0 {
-                Button("Back") { step -= 1 }.buttonStyle(.bordered)
+            if mode == .editActive {
+                // Deep-linked single-page edit: everything else is prefilled, so change the
+                // one thing and Save — no marching through the remaining steps to get out.
+                Button("Save") { finish() }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                    .disabled(!canFinish)
+            } else {
+                if step > firstStep {
+                    Button("Back") { step -= 1 }.buttonStyle(.bordered)
+                }
+                Button(step == lastStep ? "Finish" : "Next") {
+                    if step == lastStep { finish() } else { step += 1 }
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .disabled(!canAdvance)
             }
-            Button(step == lastStep ? "Finish" : "Next") {
-                if step == lastStep { finish() } else { step += 1 }
-            }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-            .disabled(!canAdvance)
         }
         .controlSize(.large)
         .padding()
@@ -396,6 +421,12 @@ struct VehicleSetupView: View {
         }
     }
 
+    /// The whole config must be saveable, whichever single page an edit landed on.
+    private var canFinish: Bool {
+        Int(wheelbase) != nil && Int(trackFront) != nil
+            && (!rearDiffers || Int(trackRear) != nil) && livingSide != nil
+    }
+
     // MARK: - Save
 
     private var sideBinding: Binding<LivingSide?> {
@@ -404,8 +435,8 @@ struct VehicleSetupView: View {
 
     private func finish() {
         guard let side = livingSide, let config = buildConfig(side: side) else { return }
-        // Edit replaces only the ACTIVE vehicle; adding (Pro multi-vehicle) keeps the rest.
-        if mode == .editActive, let active = existingConfigs.first {
+        // First-run/edit replace only the ACTIVE vehicle; adding (Pro) keeps the rest.
+        if mode != .addNew, let active = existingConfigs.first {
             modelContext.delete(active)
         }
         modelContext.insert(config)
