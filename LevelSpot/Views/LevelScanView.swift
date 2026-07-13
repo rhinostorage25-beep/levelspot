@@ -314,7 +314,7 @@ struct LevelScanView: View {
                     // Straight to the measure step — no vehicle exists yet, but nobody needs
                     // the language page to type two numbers.
                     Button { setupMode = .firstRun; setupStart = 1; showSetup = true } label: {
-                        Label("≈ estimate — set your van's size for exact figures", systemImage: "ruler")
+                        Label("≈ estimate — measure your van for exact figures", systemImage: "ruler")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
@@ -496,7 +496,7 @@ struct LevelScanView: View {
         // Say WHICH thing we're waiting for — a single "finding your position" hid a stuck,
         // never-calibrated compass behind the same words as a pending GPS fix. And the planner
         // literally cannot aim without knowing the awning side, so say THAT when it's the gap.
-        if config == nil { return "Set up your van first — the planner needs your awning side" }
+        if config == nil { return "Measure your van first — the planner needs your awning side" }
         if location.latitude == nil { return "Finding your location…" }
         if let s = sunPosition, !s.isUp {
             // Only really reachable for "Sun now" at night — the timed presets roll forward

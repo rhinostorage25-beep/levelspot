@@ -164,10 +164,10 @@ struct SettingsSheet: View {
         if vehicles.isEmpty {
             Section {
                 Button { act(.openWizard(.firstRun, startStep: 1)) } label: {
-                    Label("Set up your van", systemImage: "car")
+                    Label("Measure your van", systemImage: "ruler")
                 }
             } footer: {
-                Text("Two measurements and your ramps — unlocks exact figures instead of ≈ estimates.")
+                Text("Two measurements, your awning side and your ramps — unlocks exact figures instead of ≈ estimates.")
             }
         } else {
             Section("Vehicle") {
