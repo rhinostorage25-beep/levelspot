@@ -46,10 +46,16 @@ final class MotionService: SensorSource {
             //   attitude.roll  = rotation about device y (front-back axis) = vehicle roll
             let rawPitch = m.attitude.pitch * 180 / .pi
             let rawRoll = -(m.attitude.roll * 180 / .pi) // device roll right-high positive -> vehicle left-high positive
-            self.pitchDeg = rawPitch - self.pitchOffset
-            self.rollDeg = rawRoll - self.rollOffset
+            let newPitch = rawPitch - self.pitchOffset
+            let newRoll = rawRoll - self.rollOffset
+            // Deadband: a motionless phone must NOT invalidate the UI 10×/sec. Every observing
+            // view re-renders on each write, and SwiftUI menus rebuilt mid-tap swallow presses
+            // (the "took 3–4 taps to select" bug). 0.05° is far below anything visible on the dial.
+            if abs(newPitch - self.pitchDeg) > 0.05 { self.pitchDeg = newPitch }
+            if abs(newRoll - self.rollDeg) > 0.05 { self.rollDeg = newRoll }
             let rotation = abs(m.rotationRate.x) + abs(m.rotationRate.y) + abs(m.rotationRate.z)
-            self.isSteady = rotation < 0.15
+            let steady = rotation < 0.15
+            if steady != self.isSteady { self.isSteady = steady }
         }
     }
 

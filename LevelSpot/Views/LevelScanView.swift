@@ -25,7 +25,8 @@ struct LevelScanView: View {
     @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
 
     @State private var audio = AudioCoach()
-    @State private var sunMoment: SunMoment?   // sun planner is opt-in via the ☀ menu; nil = off
+    @State private var sunMoment: SunMoment?   // sun planner is opt-in via the ☀ button; nil = off
+    @State private var showSunOptions = false
     @State private var sunArcAzimuths: [Double] = []   // today's hourly sun azimuths (sun-up only)
     @State private var armed = false
     @State private var armPlan: LevelPlan?     // the plan when Start was tapped — the pitch "recipe"
@@ -179,8 +180,17 @@ struct LevelScanView: View {
             if nowLevel && !wasLevel && armed { Haptics.levelReached(); audio.alertLevel() }
             wasLevel = nowLevel
         }
-        .onChange(of: sunMoment) { recomputeSunArc() }
+        .onChange(of: sunMoment) { _, moment in
+            recomputeSunArc()
+            // Compass only while the planner's on (see LocationService.startHeading).
+            if moment != nil { location.requestAndStart(); location.startHeading() } else { location.stopHeading() }
+        }
         .onChange(of: location.latitude) { recomputeSunArc() }   // the first GPS fix arrives async
+        .onChange(of: showSettings) { _, open in
+            // Nothing under the Settings sheet needs live tilt, and pausing it makes the
+            // sheet's pickers rock-solid (no churn-driven re-renders while a menu is open).
+            if open { motion.stop() } else { motion.start() }
+        }
         .onChange(of: isPro) { _, pro in
             // Mid-session upgrade (purchase or the TestFlight preview toggle): onAppear already
             // ran, so start location NOW or the just-bought sun planner sits at "Finding your
@@ -220,7 +230,25 @@ struct LevelScanView: View {
             ToolbarItem(placement: .topBarTrailing) { calibrateButton }
             ToolbarItem(placement: .topBarTrailing) {
                 if isPro {
-                    sunMenu
+                    // A confirmationDialog, NOT a Menu: the Level screen re-renders with every
+                    // sensor tick, and SwiftUI menus rebuilt mid-tap swallow presses (the
+                    // "3–4 taps" bug). Alert-backed dialogs are set once at presentation.
+                    Button { showSunOptions = true } label: {
+                        Image(systemName: sunMoment != nil ? "sun.max.fill" : "sun.max")
+                            .accessibilityLabel("Sun & shade planner")
+                    }
+                    .confirmationDialog(sunDialogTitle, isPresented: $showSunOptions, titleVisibility: .visible) {
+                        ForEach(SunMoment.allCases) { moment in
+                            // "(on)" not "✓" — VoiceOver reads a literal checkmark as "check mark".
+                            Button(sunMoment == moment ? "\(moment.label) (on)" : moment.label) {
+                                sunMoment = moment
+                            }
+                        }
+                        if sunMoment != nil {
+                            Button("Sun planner off", role: .destructive) { sunMoment = nil }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    }
                 } else {
                     // Visible for free — the sun planner shouldn't be a secret. Tap = paywall.
                     Button { showPaywall = true } label: {
@@ -465,6 +493,9 @@ struct LevelScanView: View {
     }
 
     private func sunHintText(_ moment: SunMoment) -> String {
+        // Say WHICH thing we're waiting for — a single "finding your position" hid a stuck,
+        // never-calibrated compass behind the same words as a pending GPS fix.
+        if location.latitude == nil { return "Finding your location…" }
         if let s = sunPosition, !s.isUp {
             // Only really reachable for "Sun now" at night — the timed presets roll forward
             // to tomorrow (bySettingHour searches ahead), which is what an overnight parker wants.
@@ -472,6 +503,7 @@ struct LevelScanView: View {
                 ? "Sun's set — pick Morning sun to plan tomorrow's pitch"
                 : "Sun's below the horizon for \(moment.goal)"
         }
+        if location.headingDeg == nil { return "Waking the compass — wave the phone in a figure-8" }
         if sunRel == nil { return "Finding your position…" }
         // If the preset's time already passed today, we're planning TOMORROW's sun — say so.
         let planningTomorrow = moment != .now && !Calendar.current.isDateInToday(moment.date())
@@ -620,22 +652,8 @@ struct LevelScanView: View {
         }
     }
 
-    /// Sun planner presets (Pro) — one flat list: each moment pairs a time of day with the
-    /// sun/shade preference that makes sense for it.
-    private var sunMenu: some View {
-        Menu {
-            Button { sunMoment = nil } label: {
-                Label("Sun planner off", systemImage: sunMoment == nil ? "checkmark" : "poweroff")
-            }
-            Divider()
-            ForEach(SunMoment.allCases) { moment in
-                Button { sunMoment = moment } label: {
-                    Label(moment.label, systemImage: sunMoment == moment ? "checkmark" : moment.icon)
-                }
-            }
-        } label: {
-            Image(systemName: sunMoment != nil ? "sun.max.fill" : "sun.max")
-        }
+    private var sunDialogTitle: String {
+        sunMoment.map { "Sun & shade planner — \($0.label) is on" } ?? "Sun & shade planner"
     }
 
     /// Runs whatever a Settings row asked for, once the sheet is fully gone.

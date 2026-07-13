@@ -16,7 +16,15 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.headingFilter = kCLHeadingFilterNone   // report every change so the sun tracks smoothly as you turn
+        // 2° steps: still perfectly smooth to steer a van by, but doesn't spam the UI with
+        // sub-degree jitter — every heading write re-renders the whole Level screen.
+        manager.headingFilter = 2
+    }
+
+    /// Without this, an uncalibrated compass NEVER produces a valid heading and iOS never shows
+    /// its figure-8 prompt — the sun planner would sit on "finding your position" forever.
+    func locationManagerShouldDisplayHeadingCalibration(_ manager: CLLocationManager) -> Bool {
+        true
     }
 
     func requestAndStart() {
@@ -26,10 +34,20 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         case .authorizedWhenInUse, .authorizedAlways:
             authorized = true
             manager.startUpdatingLocation()
-            if CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
         default:
             authorized = false
         }
+    }
+
+    /// Heading (compass) runs ONLY while the sun planner is engaged — that's when the user is
+    /// holding the phone (so iOS's figure-8 calibration prompt is actionable, not an ambush
+    /// over the dial mid-levelling), and the compass hardware stays off the rest of the time.
+    func startHeading() {
+        if CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
+    }
+
+    func stopHeading() {
+        manager.stopUpdatingHeading()
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -43,6 +61,12 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.last else { return }
+        // Deadband ~11m: a parked van doesn't need per-second coordinate writes re-rendering
+        // the UI; sun position and pitch recall are insensitive at this scale.
+        if let lat = latitude, let lon = longitude,
+           abs(loc.coordinate.latitude - lat) < 0.0001, abs(loc.coordinate.longitude - lon) < 0.0001 {
+            return
+        }
         latitude = loc.coordinate.latitude
         longitude = loc.coordinate.longitude
     }
