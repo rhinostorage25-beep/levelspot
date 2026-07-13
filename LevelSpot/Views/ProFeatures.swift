@@ -145,6 +145,7 @@ struct SettingsSheet: View {
             List {
                 vehicleSection
                 sleepSection
+                windSection
                 shopSection
                 languageSection
                 proPreviewSection
@@ -275,6 +276,31 @@ struct SettingsSheet: View {
             .pickerStyle(.menu)
         } footer: {
             Text("The app is in English for now — the other languages are coming soon.")
+        }
+    }
+
+    // MARK: Wind alerts
+
+    @AppStorage("windAlertsOn") private var windAlertsOn = true
+
+    /// Awning wind alerts (Pro): warn before forecast gusts get awning-threatening.
+    private var windSection: some View {
+        Section {
+            if isPro {
+                Toggle(isOn: $windAlertsOn) {
+                    Label("Wind alerts", systemImage: "wind")
+                }
+            } else {
+                Button { act(.paywall) } label: {
+                    HStack {
+                        Label("Wind alerts — Pro", systemImage: "lock.fill").foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        } footer: {
+            Text("Warns you — in app and by notification — when gusts forecast at your pitch could threaten the awning (25 mph+). Weather data by [Apple Weather](https://weatherkit.apple.com/legal-attribution.html).")
         }
     }
 

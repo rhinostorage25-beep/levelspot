@@ -29,6 +29,8 @@ struct PaywallSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     benefit("sun.max.fill", "Sun & shade, all day",
                             "Morning sun, midday shade or evening sun — see the sun's whole path round the dial and park right first time.")
+                    benefit("wind", "Awning wind alerts",
+                            "A warning before awning-threatening gusts hit your pitch — on screen and as a notification.")
                     benefit("mappin.and.ellipse", "Pitch memory",
                             "Save a pitch and get the exact levelling recipe back the next time you return.")
                     benefit("bed.double.fill", "Sleep setup",

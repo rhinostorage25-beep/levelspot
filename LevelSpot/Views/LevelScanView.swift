@@ -25,6 +25,8 @@ struct LevelScanView: View {
     @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
 
     @State private var audio = AudioCoach()
+    @State private var wind = WindService()    // awning wind alerts (Pro) — silent unless gusty
+    @AppStorage("windAlertsOn") private var windAlertsOn = true
     @State private var sunMoment: SunMoment?   // sun planner is opt-in via the ☀ button; nil = off
     @State private var showSunOptions = false
     @State private var sunArcAzimuths: [Double] = []   // today's hourly sun azimuths (sun-up only)
@@ -124,6 +126,13 @@ struct LevelScanView: View {
     }
     private var sunAligned: Bool { sunRel.map { abs($0) < 10 } ?? false }
 
+    /// Kick a wind check when it could matter (Pro + alerts on + a fix). WindService
+    /// self-throttles (30 min / 5 km), so calling this from several triggers is fine.
+    private func refreshWind() {
+        guard isPro, windAlertsOn, let lat = location.latitude, let lon = location.longitude else { return }
+        Task { await wind.refreshIfNeeded(lat: lat, lon: lon) }
+    }
+
     /// Wrap a bearing difference into −180…180.
     private static func signedDelta(_ raw: Double) -> Double {
         var d = raw.truncatingRemainder(dividingBy: 360)
@@ -170,6 +179,7 @@ struct LevelScanView: View {
             audio.start()                                  // audio is free now
             if isPro { location.requestAndStart() }         // sun planner + pitch memory are Pro-only
             recomputeSunArc()
+            refreshWind()
         }
         // Deliberately NOT stopping motion here: the only push destination is the setup wizard,
         // whose calibrate step needs live readings — and push ordering can fire the wizard's
@@ -185,7 +195,20 @@ struct LevelScanView: View {
             // Compass only while the planner's on (see LocationService.startHeading).
             if moment != nil { location.requestAndStart(); location.startHeading() } else { location.stopHeading() }
         }
-        .onChange(of: location.latitude) { recomputeSunArc() }   // the first GPS fix arrives async
+        .onChange(of: location.latitude) {                       // the first GPS fix arrives async
+            recomputeSunArc()
+            refreshWind()
+        }
+        .onChange(of: windAlertsOn) { _, on in
+            if on {
+                // Ask for notification permission NOW — the user just flipped the toggle, so
+                // the prompt has context (vs ambushing them mid-levelling at the first gust).
+                Task { await wind.requestPermission() }
+                refreshWind()
+            } else {
+                wind.reset()
+            }
+        }
         .onChange(of: showSettings) { _, open in
             // Nothing under the Settings sheet needs live tilt, and pausing it makes the
             // sheet's pickers rock-solid (no churn-driven re-renders while a menu is open).
@@ -194,8 +217,8 @@ struct LevelScanView: View {
         .onChange(of: isPro) { _, pro in
             // Mid-session upgrade (purchase or the TestFlight preview toggle): onAppear already
             // ran, so start location NOW or the just-bought sun planner sits at "Finding your
-            // position…" until the next launch.
-            if pro { location.requestAndStart() }
+            // position…" until the next launch. Lapse: a booked wind alert must not outlive Pro.
+            if pro { location.requestAndStart(); refreshWind() } else { wind.reset() }
         }
         .sheet(isPresented: $showCalibrate) { CalibrateView() }
         .sheet(isPresented: $showPaywall) { PaywallSheet() }
@@ -475,6 +498,15 @@ struct LevelScanView: View {
     /// planner's on, and a small reminder when the sleep tilt is shifting the target.
     @ViewBuilder private var sunHint: some View {
         VStack(spacing: 5) {
+            // Wind first — it's the "act now" one. Silent when the forecast is calm.
+            if isPro, windAlertsOn, let warning = wind.warning {
+                Label("Gusts to \(warning.peakMPH) mph ~\(warning.timeLabel) — \(warning.severe ? "bring the awning in" : "watch the awning")",
+                      systemImage: "wind")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(warning.severe ? Theme.needsBigRamp : Theme.needsRamp)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
             if isPro, let moment = sunMoment {
                 Text(sunHintText(moment))
                     .font(.caption2.weight(.semibold))

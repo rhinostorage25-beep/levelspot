@@ -23,6 +23,15 @@ targets:
       - LevelSpot
     dependencies:
       - package: LevelSpotCore
+    # WeatherKit (awning wind alerts). ⚠ The App ID uk.co.levelspot.app must have WeatherKit
+    # ticked in the Apple Developer portal BEFORE CI builds this — under BOTH the Capabilities
+    # tab (else codesign fails: fetch-signing-files regenerates the profile from the App ID)
+    # AND the App Services tab (else the API auth-fails at runtime). Enablement can take
+    # ~30 min to propagate; until then fetches fail silently and the feature looks calm.
+    entitlements:
+      path: LevelSpot/LevelSpot.entitlements
+      properties:
+        com.apple.developer.weatherkit: true
     info:
       path: LevelSpot/Info.plist
       properties:
