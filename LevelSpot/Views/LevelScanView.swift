@@ -756,6 +756,8 @@ struct LevelScanView: View {
             showRampShop = true
         case .paywall:
             showPaywall = true
+        case .testWindAlert:
+            Task { await wind.simulateWarning() }
         }
     }
 

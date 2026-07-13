@@ -115,6 +115,7 @@ enum SettingsAction {
     case openWizard(VehicleSetupView.SetupMode, startStep: Int)
     case shop
     case paywall
+    case testWindAlert   // beta-only row — see proPreviewSection
 }
 
 /// The gear's ONE-TAP settings screen. Everything actionable is either done right here
@@ -336,10 +337,13 @@ struct SettingsSheet: View {
             )) {
                 Label("Pro preview", systemImage: "wand.and.stars")
             }
+            Button { act(.testWindAlert) } label: {
+                Label("Test wind alert", systemImage: "wind")
+            }
         } header: {
             Text("TestFlight testing")
         } footer: {
-            Text("Beta-only switch: flips every Pro feature on without a purchase, so you can test both tiers. Removed before App Store release.")
+            Text("Beta-only tools, removed before App Store release. Pro preview flips every Pro feature on without a purchase. Test wind alert fakes a 38 mph warning — capsule on the dial immediately, notification about 5 seconds later (needs Pro preview + Wind alerts on).")
         }
     }
 

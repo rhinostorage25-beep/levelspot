@@ -114,6 +114,16 @@ final class WindService {
                                                     content: content, trigger: trigger))
     }
 
+    /// TestFlight-only: inject a fake severe warning — capsule immediately, notification in
+    /// ~5 seconds — so testers can verify the plumbing without waiting for a storm. Reached
+    /// from the beta-only Settings section that is stripped before App Store submission.
+    func simulateWarning() async {
+        let fake = WindWarning(peakMPH: 38, at: Date().addingTimeInterval(30 * 60))
+        warning = fake
+        lastNotified = fake
+        await scheduleNotification(for: fake)
+    }
+
     /// Turning the feature off (or Pro lapsing): wipe ALL state, not just the pending alarm.
     /// A bare pending-removal left the capsule alive with no alarm behind it, and the throttle
     /// then blocked re-scheduling on re-enable — reset means re-enabling starts fresh.
