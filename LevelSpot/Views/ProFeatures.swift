@@ -113,6 +113,7 @@ enum SleepHeadEnd: String, CaseIterable, Identifiable {
 /// sheet's onDismiss so the navigation push / paywall never races the sheet's dismissal.
 enum SettingsAction {
     case openWizard(VehicleSetupView.SetupMode, startStep: Int)
+    case shop
     case paywall
 }
 
@@ -144,6 +145,7 @@ struct SettingsSheet: View {
             List {
                 vehicleSection
                 sleepSection
+                shopSection
                 languageSection
                 proPreviewSection
             }
@@ -273,6 +275,24 @@ struct SettingsSheet: View {
             .pickerStyle(.menu)
         } footer: {
             Text("The app is in English for now — the other languages are coming soon.")
+        }
+    }
+
+    // MARK: Shop
+
+    /// The shop shouldn't need hunting for — it's a permanent, honest storefront row here,
+    /// and the coaching card on the dial deep-links in with the exact height needed.
+    private var shopSection: some View {
+        Section {
+            Button { act(.shop) } label: {
+                HStack {
+                    Label("Shop levelling ramps", systemImage: "cart").foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                }
+            }
+        } footer: {
+            Text("Real UK ramps, cheapest first. The coaching on the dial links here with the exact height your pitch needs.")
         }
     }
 

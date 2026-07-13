@@ -245,10 +245,19 @@ struct LevelScanView: View {
                             "Rest it flat in the van, screen up, to read the ground's slope.", true),
                            tappable: false)
             } else if let plan {
-                if !plan.canLevel {
-                    // Can't level here → tap through to the shop (ramps that actually reach the height).
+                let neededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
+                // !isLevel (the VIEW's 1.2° band) must gate this too: the plan's own tolerance is
+                // tighter (~0.3–0.6°), and in the disagreement band the card shows the green
+                // "Nailed it" — which must never secretly be a shop button.
+                let needsDriveUpRamp = !isLevel && !plan.isLevel && plan.canLevel && !usesPerWheelFlow && !armed
+                // The selling moments, kept honest: (a) your ramps can't reach AND a real product
+                // can (never a dead-end shop), or (b) we're coaching off rough defaults, so the
+                // user may own no ramps at all. Someone whose own ramps do the job isn't sold to.
+                let sellable = (!plan.canLevel && !ReferenceStore.shared.rampsReaching(mm: neededMM).isEmpty)
+                    || (needsDriveUpRamp && usingRoughDefaults)
+                if sellable {
                     Button {
-                        shopNeededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
+                        shopNeededMM = neededMM
                         showRampShop = true
                     } label: {
                         noticeCard(rampNotice(plan), tappable: true)
@@ -329,8 +338,17 @@ struct LevelScanView: View {
         let approx = usingRoughDefaults ? "≈" : "~"
         if !plan.canLevel {
             // Calm, non-scolding copy — a stressed user reads this right before the Buy tap.
-            return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "This spot's too steep for your ramps",
-                    "Reposition, or ramps that reach \(approx)\(neededMM)mm (yours reach \(ceiling)mm).", false)
+            // Name the actual product + price: "ramps exist" doesn't sell, "£48 fixes this" does.
+            // Rough defaults = never claim "your ramps": they haven't told us they own any.
+            if let ramp = ReferenceStore.shared.rampsReaching(mm: neededMM).first {
+                let reach = usingRoughDefaults ? "Typical ramps reach \(ceiling)mm" : "Yours reach \(ceiling)mm"
+                return ("exclamationmark.triangle.fill", Theme.needsBigRamp,
+                        usingRoughDefaults ? "This spot's too steep for typical ramps" : "This spot's too steep for your ramps",
+                        "\(reach) — this needs \(approx)\(neededMM)mm. \(ramp.name) (\(ramp.priceLabel)) covers it — tap to shop.", false)
+            }
+            // Nothing on the market reaches it: say so and DON'T open an empty shop.
+            return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "This spot's too steep",
+                    "Needs \(approx)\(neededMM)mm — beyond any levelling ramp. Best to move the van.", false)
         }
         if isLevel {
             return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it.", false)
@@ -349,8 +367,21 @@ struct LevelScanView: View {
         }
         // Drive-up ramps (stepped / wedge).
         if !armed {
+            // Big-custom-step edge: the plan can be "level enough for these ramps" while the
+            // dial still reads a degree off — no wheel needs a ramp, so say that, not "Ramp · ~0mm".
+            guard !plan.ramps.isEmpty else {
+                return ("checkmark.circle", Color(.secondaryLabel), "Close enough for your ramps",
+                        "Your smallest step can't improve this — you're within its tolerance.", true)
+            }
             let wheels = plan.ramps.map { $0.wheelName }.joined(separator: " & ")
             let step = plan.ramps.map { $0.stepMM ?? 0 }.max() ?? 0
+            // Rough defaults = we've never been told they own ramps — offer one, with a price.
+            // Product is chosen by neededMM (what the SHOP filters on), not the snapped step,
+            // so the card never promises a ramp the opened sheet then hides.
+            if usingRoughDefaults, let ramp = ReferenceStore.shared.rampsReaching(mm: neededMM).first {
+                return ("cart.fill", Theme.needsRamp, "Ramp \(wheels) · \(approx)\(step)mm",
+                        "No ramps yet? \(ramp.name) (\(ramp.priceLabel)) covers it — tap to shop. Got some? Drop them in and tap Start.", false)
+            }
             return ("arrow.up.circle.fill", Theme.needsRamp, "Ramp \(wheels) · \(approx)\(step)mm",
                     "Drop your ramps in front of those wheels, then tap Start.", false)
         }
@@ -616,6 +647,9 @@ struct LevelScanView: View {
             setupMode = mode
             setupStart = startStep
             showSetup = true
+        case .shop:
+            shopNeededMM = nil   // browsing, not fixing a specific deficit — show the lot
+            showRampShop = true
         case .paywall:
             showPaywall = true
         }

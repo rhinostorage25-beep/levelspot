@@ -454,24 +454,44 @@ struct VehicleSetupView: View {
 struct AwningVan: View {
     let selection: LivingSide?
 
+    /// MEASURED from van-top.png (1448×1086; drawn van occupies x 112–1378, y 228–774) — the
+    /// awnings hug the van as DRAWN, not the image's whitespace. Previous versions eyeballed
+    /// these against the frame and were ~2× off (the fitted image never fills the frame).
+    /// The PNG is 4:3 with the front on the RIGHT; on screen it's rotated −90° (front up).
+    /// Everything is a fraction of `vanW`, the on-screen width of the image box across the van.
+    private enum M {
+        static let aspect: CGFloat = 1448.0 / 1086.0
+        static let visW: CGFloat = 0.503      // visible van width  = 546/1086 of the box height
+        static let visH: CGFloat = 1.166      // visible van length = (1266/1448) · aspect
+        static let centerDX: CGFloat = -0.039  // drawn-van centre offset from the box centre
+        static let centerDY: CGFloat = -0.019  // (post-rotation screen coords)
+    }
+
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
-            let vanW = min(w * 0.38, 156)
-            let vanH = min(h * 0.9, vanW * 3.2)
+            // As big as fits. Bounds derived from the worst open-awning extents: sideways the
+            // van+open awning spans ≈1.69×vanW (needs vanW ≤ 0.59·w); a front/rear awning's far
+            // edge reaches ≈1.0×vanW from centre (needs vanW ≤ 0.49·h). On tall phones the width
+            // term binds (≈240pt on a 430pt screen); the height term only guards short layouts.
+            let vanW = min(w * 0.56, h * 0.48, 270)
             let cx = w / 2, cy = h / 2
+            let vanCX = cx + M.centerDX * vanW
+            let vanCY = cy + M.centerDY * vanW
+            let halfW = M.visW * vanW / 2    // centre → the van's visible side edge
+            let halfH = M.visH * vanW / 2    // centre → the visible nose/tail
             ZStack {
                 // All four awnings live here but only the SELECTED one is open (scaled to 1); the
                 // rest are collapsed at the van edge (scale 0). Selection change animates the swap.
                 ForEach(LivingSide.allCases, id: \.self) { side in
-                    awning(side, cx: cx, cy: cy, vanW: vanW, vanH: vanH)
+                    awning(side, vanCX: vanCX, vanCY: vanCY, halfW: halfW, halfH: halfH)
                 }
                 Image("VanTop")
                     .resizable().scaledToFit()
-                    .frame(width: vanH, height: vanW)     // sized landscape...
-                    .rotationEffect(.degrees(-90))         // ...then stood up, front to the top
-                    .frame(width: vanW, height: vanH)
-                    .blendMode(.multiply)                  // drop the image's white box into the page
+                    .frame(width: vanW * M.aspect, height: vanW)   // box == image aspect: fills exactly
+                    .rotationEffect(.degrees(-90))                  // front (image right) → up
+                    .frame(width: vanW, height: vanW * M.aspect)
+                    .blendMode(.multiply)                           // drop the white box into the page
                     .position(x: cx, y: cy)
             }
             .frame(width: w, height: h)
@@ -480,20 +500,21 @@ struct AwningVan: View {
         .allowsHitTesting(false)   // selection is via the buttons above — the diagram is display-only
     }
 
-    private func awning(_ side: LivingSide, cx: CGFloat, cy: CGFloat, vanW: CGFloat, vanH: CGFloat) -> some View {
+    private func awning(_ side: LivingSide, vanCX: CGFloat, vanCY: CGFloat,
+                        halfW: CGFloat, halfH: CGFloat) -> some View {
         let selected = selection == side
         let horizontal = (side == .left || side == .right)
-        let reach: CGFloat = horizontal ? vanW * 0.62 : vanH * 0.17     // how far it opens out (shorter now)
-        let thickness: CGFloat = horizontal ? vanH * 0.92 : vanW * 0.6  // runs the FULL roof length
+        // Roll-out distance ≈ a real cassette awning: roughly the van's width when out.
+        let reach: CGFloat = horizontal ? halfW * 2.2 : halfW * 1.6
+        // Side awnings run the full visible roof; front/rear span the visible van width.
+        let thickness: CGFloat = horizontal ? halfH * 2 * 0.97 : halfW * 2 * 0.95
         let cw = horizontal ? reach : thickness
         let ch = horizontal ? thickness : reach
-        // Meet the van's visual edge, not the frame edge — the image has whitespace, so we come in.
-        let sideEdge = vanW * 0.24
-        let endEdge = vanH * 0.44
-        let px: CGFloat = side == .left ? cx - sideEdge - reach / 2
-            : side == .right ? cx + sideEdge + reach / 2 : cx
-        let py: CGFloat = side == .front ? cy - endEdge - reach / 2
-            : side == .rear ? cy + endEdge + reach / 2 : cy
+        // The canopy's inner edge sits ON the drawn van's edge — measured, not guessed.
+        let px: CGFloat = side == .left ? vanCX - halfW - reach / 2
+            : side == .right ? vanCX + halfW + reach / 2 : vanCX
+        let py: CGFloat = side == .front ? vanCY - halfH - reach / 2
+            : side == .rear ? vanCY + halfH + reach / 2 : vanCY
         let anchor: UnitPoint = side == .left ? .trailing : side == .right ? .leading
             : side == .front ? .bottom : .top
 
@@ -534,7 +555,6 @@ private struct AwningCanopy: View {
             Text(label.uppercased())
                 .font(.system(size: 11, weight: .heavy))
                 .foregroundStyle(.white)
-                .rotationEffect(.degrees(horizontal ? 0 : 0))
         }
         .shadow(color: .black.opacity(selected ? 0.18 : 0), radius: 4, y: 2)
     }
