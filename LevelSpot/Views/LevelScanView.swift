@@ -532,6 +532,25 @@ struct LevelScanView: View {
         let mm = wheel.stepMM ?? wheel.liftMM
         let outward: CGFloat = wheel.side == .left ? -1 : 1
         return ZStack {
+            if usesPerWheelFlow {
+                // Air bags / blocks / ratchets go UNDER the wheel — a pad beneath the dot.
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Theme.needsRamp.opacity(0.85))
+                    .frame(width: 26, height: 13)
+            } else {
+                // Drive-up ramp: the WEDGE sits on the ground ahead of the wheel, and the
+                // pulsing chevron says "drive forward onto it" — no reading required.
+                RampWedge()
+                    .fill(Theme.needsRamp)
+                    .frame(width: 20, height: 12)
+                    .shadow(color: Theme.needsRamp.opacity(0.8), radius: 4)
+                    .offset(y: -31)
+                Image(systemName: "chevron.compact.up")
+                    .font(.system(size: 16, weight: .heavy))
+                    .foregroundStyle(Theme.needsRamp)
+                    .symbolEffect(.pulse, options: .repeating)
+                    .offset(y: -17)
+            }
             Circle().fill(Theme.needsRamp)
                 .frame(width: 14, height: 14)
                 .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
@@ -775,6 +794,18 @@ struct LevelScanView: View {
         savePitchData = SavePitchData(latitude: lat, longitude: lon,
                                       heading: location.headingDeg.map { Int($0) },
                                       fl: lifts[0], fr: lifts[1], rl: lifts[2], rr: lifts[3])
+    }
+
+    /// The iconic side-profile ramp wedge — instantly reads "ramp" even at 20pt.
+    private struct RampWedge: Shape {
+        func path(in rect: CGRect) -> Path {
+            var p = Path()
+            p.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            p.closeSubpath()
+            return p
+        }
     }
 
     #if DEBUG
