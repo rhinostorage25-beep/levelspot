@@ -48,6 +48,14 @@ struct LevelScanView: View {
     @State private var shopNeededMM: Int?
     @State private var wasLevel = false
 
+    // Wheel markers as SHOWN — decoupled from the live 10Hz plan. Raw sensor wobble sits the
+    // tilt right on a ramp-step boundary and the naive markers strobed +40↔+70 ("flicker around
+    // way too much to be useful"). The stabiliser below only commits a change once the candidate
+    // has held steady for consecutive half-second ticks.
+    @State private var shownMarkers: [Marker] = []
+    @State private var pendingMarkers: [Marker]?
+    @State private var pendingTicks = 0
+
     private let dialSize: CGFloat = 280
     // The "close enough" band for a VAN (not a survey instrument): ~1.2° is imperceptible when
     // you're sleeping/cooking, and it stops a fraction-of-a-degree calibration residual (an iPhone
@@ -181,6 +189,15 @@ struct LevelScanView: View {
             recomputeSunArc()
             refreshWind()
         }
+        // The marker stabiliser heartbeat. A plain repeating task (not onChange of the plan)
+        // because the whole point is to keep evaluating while the candidate is HOLDING a value —
+        // onChange goes quiet exactly when we need to confirm stability. Cancelled with the view.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                stabilizeMarkers()
+            }
+        }
         // Deliberately NOT stopping motion here: the only push destination is the setup wizard,
         // whose calibrate step needs live readings — and push ordering can fire the wizard's
         // onAppear BEFORE our onDisappear, so a stop() here could freeze the wizard's motion
@@ -289,7 +306,13 @@ struct LevelScanView: View {
 
     @ViewBuilder private var noticeZone: some View {
         VStack(spacing: 6) {
-            if !isPhoneFlatEnough {
+            if isPro, windAlertsOn, wind.warning != nil {
+                // A live gust warning takes over the card slot entirely — same 116pt, so the
+                // fixed layout holds and nothing gets pushed off-screen. The coaching the card
+                // would have shown is duplicated on the dial (markers) and the readout, so for
+                // the duration of a blow the loudest thing on screen is the thing that matters.
+                windBanner
+            } else if !isPhoneFlatEnough {
                 // Not actually resting flat in the van (being held/checked) — an mm figure here
                 // would be nonsense (see the sanity clamp in `plan`), so ask for a flat read instead.
                 noticeCard(("iphone.gen3.radiowaves.left.and.right", Color(.secondaryLabel), "Lay the phone flat",
@@ -384,6 +407,9 @@ struct LevelScanView: View {
         -> (icon: String, tint: Color, title: String, message: String, subtle: Bool) {
         let ceiling = effectiveRampSet.ceilingMM
         let neededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
+        // The COPY rounds to 5mm so it doesn't strobe "≈173/≈174" at sensor rate; product
+        // selection and the shop filter keep the raw figure.
+        let neededText = ((neededMM + 2) / 5) * 5
         // "≈" flags a rough-default figure honestly; "~" just marks the normal rounding once
         // the van's real size is known.
         let approx = usingRoughDefaults ? "≈" : "~"
@@ -395,11 +421,11 @@ struct LevelScanView: View {
                 let reach = usingRoughDefaults ? "Typical ramps reach \(ceiling)mm" : "Yours reach \(ceiling)mm"
                 return ("exclamationmark.triangle.fill", Theme.needsBigRamp,
                         usingRoughDefaults ? "This spot's too steep for typical ramps" : "This spot's too steep for your ramps",
-                        "\(reach) — this needs \(approx)\(neededMM)mm. \(ramp.name) (\(ramp.priceLabel)) covers it — tap to shop.", false)
+                        "\(reach) — this needs \(approx)\(neededText)mm. \(ramp.name) (\(ramp.priceLabel)) covers it — tap to shop.", false)
             }
             // Nothing on the market reaches it: say so and DON'T open an empty shop.
             return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "This spot's too steep",
-                    "Needs \(approx)\(neededMM)mm — beyond any levelling ramp. Best to move the van.", false)
+                    "Needs \(approx)\(neededText)mm — beyond any levelling ramp. Best to move the van.", false)
         }
         if isLevel {
             return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it.", false)
@@ -418,14 +444,23 @@ struct LevelScanView: View {
         }
         // Drive-up ramps (stepped / wedge).
         if !armed {
+            // Read the SAME stabilised markers the dial shows — on a step-boundary wobble the
+            // live plan strobes ~40↔~70 at sensor rate, and the card and the dial must never
+            // disagree in one glance. Falls back to the live plan only in the sub-second window
+            // before the stabiliser's first commit.
+            let stable: [(name: String, mm: Int)] = shownMarkers.isEmpty
+                ? plan.ramps.map { ($0.wheelName, $0.stepMM ?? $0.liftMM) }
+                : shownMarkers.map { ($0.name, $0.mm) }
             // Big-custom-step edge: the plan can be "level enough for these ramps" while the
             // dial still reads a degree off — no wheel needs a ramp, so say that, not "Ramp · ~0mm".
-            guard !plan.ramps.isEmpty else {
+            // Gated on the STABILISED list, not live plan.ramps, or this title flaps at the
+            // smallest-step tolerance boundary exactly like the markers used to.
+            guard !stable.isEmpty else {
                 return ("checkmark.circle", Color(.secondaryLabel), "Close enough for your ramps",
                         "Your smallest step can't improve this — you're within its tolerance.", true)
             }
-            let wheels = plan.ramps.map { $0.wheelName }.joined(separator: " & ")
-            let step = plan.ramps.map { $0.stepMM ?? 0 }.max() ?? 0
+            let wheels = stable.map { $0.name }.joined(separator: " & ")
+            let step = stable.map { $0.mm }.max() ?? 0
             // Rough defaults = we've never been told they own ramps — offer one, with a price.
             // Product is chosen by neededMM (what the SHOP filters on), not the snapped step,
             // so the card never promises a ramp the opened sheet then hides.
@@ -514,23 +549,84 @@ struct LevelScanView: View {
         static let rearAxle: CGFloat = 0.78
     }
 
-    /// One glowing dot per wheel that needs a ramp, with its target height — disappears
-    /// wheel-by-wheel as the van comes up, which doubles as live progress feedback.
-    @ViewBuilder private var wheelMarkers: some View {
-        if isPhoneFlatEnough, let plan, plan.canLevel {
-            ForEach(plan.ramps, id: \.wheelName) { wheel in
-                wheelMarker(wheel)
-            }
+    /// A wheel marker as displayed — a value type so the stabiliser can compare frames.
+    private struct Marker: Equatable {
+        let name: String
+        let left: Bool
+        let front: Bool
+        var mm: Int
+    }
+
+    /// What the live plan WOULD show right now. The stabiliser decides when the display follows.
+    /// Sorted into a FIXED wheel order — plan.ramps re-sorts by (noisy) liftMM on every access,
+    /// so two near-equal wheels swap places tick to tick and every ordered comparison below
+    /// would churn on pure re-orderings that mean nothing.
+    private var candidateMarkers: [Marker] {
+        guard isPhoneFlatEnough, let plan, plan.canLevel else { return [] }
+        return plan.ramps.map {
+            Marker(name: $0.wheelName, left: $0.side == .left, front: $0.end == .front,
+                   mm: $0.stepMM ?? $0.liftMM)
+        }
+        .sorted { ($0.front ? 0 : 1, $0.left ? 0 : 1) < ($1.front ? 0 : 1, $1.left ? 0 : 1) }
+    }
+
+    /// Commit a marker change only once it has survived consecutive half-second ticks: a
+    /// candidate that keeps flapping (tilt sat right on a ramp-step boundary) keeps resetting
+    /// the clock and the display simply doesn't move. Confirmation windows by transition:
+    /// nothing→something = 1 tick (a deliberate test should feel immediate), something→nothing
+    /// = 2 (progress feedback as wheels come up), value/set changes = 3 — long enough that a
+    /// boundary oscillation aliasing into the 500ms comb (two agreeing samples ~every 1.5s)
+    /// almost never sneaks a flap through.
+    private func stabilizeMarkers() {
+        var candidate = mmSteadied(candidateMarkers, against: shownMarkers)
+        if let pending = pendingMarkers {
+            // Steady against the pending value too, or continuous (air/wedge/ratchet) sets —
+            // whose mm is the raw rounded lift, jittering ±1-2mm per read — would reset the
+            // tick count forever and never commit a genuine change.
+            candidate = mmSteadied(candidate, against: pending)
+        }
+        if candidate == shownMarkers { pendingMarkers = nil; return }
+        if candidate != pendingMarkers {
+            pendingMarkers = candidate
+            pendingTicks = 1
+        } else {
+            pendingTicks += 1
+        }
+        let needed = shownMarkers.isEmpty ? 1 : (candidate.isEmpty ? 2 : 3)
+        if pendingTicks >= needed {
+            shownMarkers = candidate
+            pendingMarkers = nil
         }
     }
 
-    private func wheelMarker(_ wheel: WheelRamp) -> some View {
+    /// Same wheels, near-same numbers → keep the numbers already on show. Kills the ±few-mm
+    /// label jitter on continuous (air/ratchet) sets; stepped sets jump ≥30mm so a real step
+    /// change always gets through. Matched by wheel NAME, not position.
+    private func mmSteadied(_ candidate: [Marker], against reference: [Marker]) -> [Marker] {
+        guard Set(candidate.map(\.name)) == Set(reference.map(\.name)) else { return candidate }
+        let refMM = Dictionary(uniqueKeysWithValues: reference.map { ($0.name, $0.mm) })
+        return candidate.map { c in
+            var m = c
+            if let r = refMM[c.name], abs(c.mm - r) < 15 { m.mm = r }
+            return m
+        }
+    }
+
+    /// One glowing dot per wheel that needs a ramp, with its target height — disappears
+    /// wheel-by-wheel as the van comes up, which doubles as live progress feedback.
+    @ViewBuilder private var wheelMarkers: some View {
+        ForEach(shownMarkers, id: \.name) { marker in
+            wheelMarker(marker)
+        }
+    }
+
+    private func wheelMarker(_ wheel: Marker) -> some View {
         let d = dialSize
-        let axleFrac = wheel.end == .front ? DialVan.frontAxle : DialVan.rearAxle
-        let x = DialVan.centerDX * d + (wheel.side == .left ? -1 : 1) * DialVan.halfW * d
+        let axleFrac = wheel.front ? DialVan.frontAxle : DialVan.rearAxle
+        let x = DialVan.centerDX * d + (wheel.left ? -1 : 1) * DialVan.halfW * d
         let y = DialVan.centerDY * d - DialVan.halfH * d + axleFrac * (2 * DialVan.halfH * d)
-        let mm = wheel.stepMM ?? wheel.liftMM
-        let outward: CGFloat = wheel.side == .left ? -1 : 1
+        let mm = wheel.mm
+        let outward: CGFloat = wheel.left ? -1 : 1
         return ZStack {
             if usesPerWheelFlow {
                 // Air bags / blocks / ratchets go UNDER the wheel — a pad beneath the dot.
@@ -565,19 +661,42 @@ struct LevelScanView: View {
         .offset(x: x, y: y)
     }
 
+    /// The wind warning, sized like it matters: a full-width solid banner filling the same
+    /// 116pt slot as the coach card — amber for "watch it", red for "bring it in". The first
+    /// version was a caption-sized capsule under the dial and the tester's verdict was "wind is
+    /// a tiny line, need a big warning across the screen"; a first fix that ADDED a banner row
+    /// blew the fixed height budget and shoved the LEVEL readout under the bottom bar, so it
+    /// takes the card slot over instead — same footprint, zero reflow.
+    @ViewBuilder private var windBanner: some View {
+        if let warning = wind.warning {
+            let tone = warning.severe ? Theme.needsBigRamp : Theme.needsRamp
+            HStack(spacing: 14) {
+                Image(systemName: "wind")
+                    .font(.system(size: 34, weight: .black))
+                    .symbolEffect(.pulse, options: .repeating)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Gusts to \(warning.peakMPH) mph ~\(warning.timeLabel)")
+                        .font(.title3.weight(.black))
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                    Text(warning.severe ? "Bring the awning in" : "Watch the awning")
+                        .font(.headline.weight(.bold))
+                        .opacity(0.94)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(14)
+            .frame(height: 116)
+            .frame(maxWidth: .infinity)
+            .background(tone, in: RoundedRectangle(cornerRadius: 14))
+            .shadow(color: tone.opacity(0.4), radius: 8, y: 3)
+        }
+    }
+
     /// Opt-in hints — shown BELOW the dial (not overlapping it): the sun caption when the
     /// planner's on, and a small reminder when the sleep tilt is shifting the target.
     @ViewBuilder private var sunHint: some View {
         VStack(spacing: 5) {
-            // Wind first — it's the "act now" one. Silent when the forecast is calm.
-            if isPro, windAlertsOn, let warning = wind.warning {
-                Label("Gusts to \(warning.peakMPH) mph ~\(warning.timeLabel) — \(warning.severe ? "bring the awning in" : "watch the awning")",
-                      systemImage: "wind")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(warning.severe ? Theme.needsBigRamp : Theme.needsRamp)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: Capsule())
-            }
             if isPro, let moment = sunMoment {
                 Text(sunHintText(moment))
                     .font(.caption2.weight(.semibold))
@@ -796,13 +915,16 @@ struct LevelScanView: View {
                                       fl: lifts[0], fr: lifts[1], rl: lifts[2], rr: lifts[3])
     }
 
-    /// The iconic side-profile ramp wedge — instantly reads "ramp" even at 20pt.
+    /// The ramp marker, drawn as an arrowhead pointing UP the screen = the direction you drive.
+    /// (v1 was a side-profile wedge whose slope ran left-to-right — on the top-view van it read
+    /// as pointing sideways: "ramps point the wrong way". On a top view the only direction that
+    /// exists is travel, so the shape now points that way, in line with the pulsing chevron.)
     private struct RampWedge: Shape {
         func path(in rect: CGRect) -> Path {
             var p = Path()
-            p.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+            p.move(to: CGPoint(x: rect.midX, y: rect.minY))
             p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
             p.closeSubpath()
             return p
         }
