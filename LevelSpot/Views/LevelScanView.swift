@@ -482,6 +482,11 @@ struct LevelScanView: View {
             Circle().stroke(target.opacity(0.4), lineWidth: 1).frame(width: 66, height: 66)
             ScopeReticle().stroke(target.opacity(0.85), lineWidth: 1.3).frame(width: 140, height: 140)
 
+            // WHAT TO DO, drawn where the eyes already are: the wheels that need ramping light
+            // up on the van itself, each with its target height. (The coaching card above says
+            // the same thing in words, but the dial dominates attention — testers never saw it.)
+            wheelMarkers
+
             Circle()
                 .fill(target)
                 .frame(width: 36, height: 36)
@@ -492,6 +497,53 @@ struct LevelScanView: View {
         }
         .frame(width: dialSize + 18, height: dialSize + 18)
         .frame(maxWidth: .infinity)
+    }
+
+    /// The van as drawn on the dial, derived from the same MEASURED png constants as
+    /// AwningVan.M, scaled to this layout: the image fits a (dialSize − 2·6% padding) square,
+    /// so its pre-rotation drawn height = 0.88 · (1086/1448) · dialSize ≈ 0.6597 · dialSize.
+    private enum DialVan {
+        static let unit: CGFloat = 0.6597                     // pre-rotation height / dialSize
+        static let halfW: CGFloat = 0.503 * unit / 2          // centre → visible van side edge
+        static let halfH: CGFloat = 1.166 * unit / 2          // centre → visible nose/tail
+        static let centerDX: CGFloat = -0.039 * unit + 0.02   // measured offset + the dial's x nudge
+        static let centerDY: CGFloat = -0.019 * unit
+        /// Axle positions as fractions of van length from the nose (top view hides the wheels,
+        /// so these are typical panel-van proportions — indicator dots, not survey marks).
+        static let frontAxle: CGFloat = 0.18
+        static let rearAxle: CGFloat = 0.78
+    }
+
+    /// One glowing dot per wheel that needs a ramp, with its target height — disappears
+    /// wheel-by-wheel as the van comes up, which doubles as live progress feedback.
+    @ViewBuilder private var wheelMarkers: some View {
+        if isPhoneFlatEnough, let plan, plan.canLevel {
+            ForEach(plan.ramps, id: \.wheelName) { wheel in
+                wheelMarker(wheel)
+            }
+        }
+    }
+
+    private func wheelMarker(_ wheel: WheelRamp) -> some View {
+        let d = dialSize
+        let axleFrac = wheel.end == .front ? DialVan.frontAxle : DialVan.rearAxle
+        let x = DialVan.centerDX * d + (wheel.side == .left ? -1 : 1) * DialVan.halfW * d
+        let y = DialVan.centerDY * d - DialVan.halfH * d + axleFrac * (2 * DialVan.halfH * d)
+        let mm = wheel.stepMM ?? wheel.liftMM
+        let outward: CGFloat = wheel.side == .left ? -1 : 1
+        return ZStack {
+            Circle().fill(Theme.needsRamp)
+                .frame(width: 14, height: 14)
+                .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
+                .shadow(color: Theme.needsRamp.opacity(0.9), radius: 6)
+            Text("\(usingRoughDefaults ? "≈" : "+")\(mm)")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .foregroundStyle(Theme.needsRamp)
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .background(.black.opacity(0.55), in: Capsule())
+                .offset(x: outward * 36)
+        }
+        .offset(x: x, y: y)
     }
 
     /// Opt-in hints — shown BELOW the dial (not overlapping it): the sun caption when the
