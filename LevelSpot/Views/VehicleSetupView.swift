@@ -394,11 +394,16 @@ struct VehicleSetupView: View {
 
     private func finish() {
         guard let side = livingSide, let config = buildConfig(side: side) else { return }
-        // First-run/edit replace only the ACTIVE vehicle; adding (Pro) keeps the rest.
-        if mode != .addNew, let active = existingConfigs.first {
+        // INSERT before DELETE, then save explicitly. SwiftData flushes lazily — a force-quit
+        // right after Save could discard the pending transaction, and delete-first ordering
+        // makes the worst partial outcome "no vehicle at all" (which we appear to have hit
+        // in the field). Insert-first + explicit save means the worst case is a duplicate,
+        // which self-heals (newest updatedAt wins everywhere).
+        modelContext.insert(config)
+        if mode != .addNew, let active = existingConfigs.first, active !== config {
             modelContext.delete(active)
         }
-        modelContext.insert(config)
+        try? modelContext.save()
         dismiss()
     }
 

@@ -494,7 +494,9 @@ struct LevelScanView: View {
 
     private func sunHintText(_ moment: SunMoment) -> String {
         // Say WHICH thing we're waiting for — a single "finding your position" hid a stuck,
-        // never-calibrated compass behind the same words as a pending GPS fix.
+        // never-calibrated compass behind the same words as a pending GPS fix. And the planner
+        // literally cannot aim without knowing the awning side, so say THAT when it's the gap.
+        if config == nil { return "Set up your van first — the planner needs your awning side" }
         if location.latitude == nil { return "Finding your location…" }
         if let s = sunPosition, !s.isUp {
             // Only really reachable for "Sun now" at night — the timed presets roll forward
