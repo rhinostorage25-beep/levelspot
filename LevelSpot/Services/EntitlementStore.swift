@@ -32,11 +32,14 @@ final class EntitlementStore {
     private static let previewKey = "proPreviewOverride"
     private(set) var previewProOn = UserDefaults.standard.bool(forKey: EntitlementStore.previewKey)
 
-    /// Flip the TestFlight preview lever. Fires a fresh `updateEntitlement()` so `isPro`
-    /// reflects it immediately (real entitlement still takes priority if present).
+    /// Flip the TestFlight preview lever. `isPro` updates SYNCHRONOUSLY — waiting on the
+    /// StoreKit entitlement enumeration made the toggle feel dead (on TestFlight it can stall,
+    /// leaving Pro locked until relaunch). The async refresh still runs to reconcile a real
+    /// purchase (so switching the preview OFF can't lock out a genuine buyer).
     func setPreviewPro(_ on: Bool) {
         previewProOn = on
         UserDefaults.standard.set(on, forKey: Self.previewKey)
+        isPro = on   // optimistic; updateEntitlement() restores true if a real purchase exists
         Task { await updateEntitlement() }
     }
 

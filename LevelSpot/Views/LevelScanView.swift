@@ -193,7 +193,7 @@ struct LevelScanView: View {
         // Settings actions (wizard push / paywall) run AFTER the sheet is gone, so the
         // navigation push never races the sheet dismissal.
         .sheet(isPresented: $showSettings, onDismiss: runPendingSettingsAction) {
-            SettingsSheet(isPro: isPro) { pendingSettings = $0 }
+            SettingsSheet { pendingSettings = $0 }
         }
         .sheet(item: $savePitchData) { data in SavePitchSheet(data: data) }
         .sheet(item: $shownPitch) { pitch in PitchDetailSheet(pitch: pitch) }

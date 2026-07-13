@@ -128,8 +128,11 @@ struct SettingsSheet: View {
     @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
     @AppStorage("appLanguageCode") private var languageCode = "en"
 
-    let isPro: Bool
     let onAction: (SettingsAction) -> Void
+
+    /// LIVE, not a frozen init parameter — flipping the Pro-preview toggle below must unlock
+    /// the sleep and add-vehicle rows in THIS open sheet, not the next one.
+    private var isPro: Bool { entitlements.isPro }
 
     private let languages: [(code: String, name: String, flag: String)] = [
         ("en", "English", "🇬🇧"), ("de", "Deutsch", "🇩🇪"), ("fr", "Français", "🇫🇷"),
