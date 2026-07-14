@@ -13,12 +13,15 @@ enum SunMoment: String, CaseIterable, Identifiable {
     case now, morningSun, middayShade, eveningSun
     var id: String { rawValue }
 
+    // Time labels are uniform ("Now/Morning/Midday/Evening"); the RESULT (sun vs shade) is
+    // described separately in the guidance line — mixing "Morning sun" with "Midday shade"
+    // in one list made the picker describe two different kinds of thing.
     var label: String {
         switch self {
-        case .now: return "Sun now"
-        case .morningSun: return "Morning sun"
-        case .middayShade: return "Midday shade"
-        case .eveningSun: return "Evening sun"
+        case .now: return "Now"
+        case .morningSun: return "Morning"
+        case .middayShade: return "Midday"
+        case .eveningSun: return "Evening"
         }
     }
 

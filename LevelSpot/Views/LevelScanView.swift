@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 import LevelSpotCore
 
 /// The one screen.
@@ -18,6 +19,7 @@ struct LevelScanView: View {
     @Environment(MotionService.self) private var motion
     @Environment(LocationService.self) private var location
     @Environment(EntitlementStore.self) private var entitlements
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // Pro pack data: the saved pitches (vehicles live in SettingsSheet's own query now).
     @Query private var pitches: [PitchRecord]
@@ -42,7 +44,10 @@ struct LevelScanView: View {
     @State private var showInflateGuide = false
     @State private var showRampShop = false
     @State private var showPitchTeaser = false   // free tier: the "Pro would remember this" moment
-    @State private var pitchTeaserShown = false  // once per session — a tease, not a nag
+    @State private var pitchTeaserShown = false  // once per session — a mention, not a nag
+    @State private var showMovementSafety = false
+    // Persisted: the one-time "do not hold the phone while moving" confirmation.
+    @AppStorage("movementSafetyShown") private var movementSafetyShown = false
     @State private var savePitchData: SavePitchData?
     @State private var shownPitch: PitchRecord?
     @State private var shopNeededMM: Int?
@@ -56,7 +61,9 @@ struct LevelScanView: View {
     @State private var pendingMarkers: [Marker]?
     @State private var pendingTicks = 0
 
-    private let dialSize: CGFloat = 280
+    @Environment(\.dynamicTypeSize) private var typeSize
+    /// The instrument shares the screen with much taller text at accessibility sizes.
+    private var dialSize: CGFloat { typeSize.isAccessibilitySize ? 220 : 280 }
     // The "close enough" band for a VAN (not a survey instrument): ~1.2° is imperceptible when
     // you're sleeping/cooking, and it stops a fraction-of-a-degree calibration residual (an iPhone
     // can't sit perfectly flat — camera bump) from reading "off" on genuinely level ground.
@@ -169,15 +176,20 @@ struct LevelScanView: View {
     // MARK: - Body (fixed layout — nothing here changes size as you tilt)
 
     var body: some View {
-        VStack(spacing: 14) {
-            noticeZone
-            dial
-            sunHint
-            levelStatus
-            Spacer(minLength: 0)
+        // A ScrollView that doesn't scroll at standard type sizes (basedOnSize) — the fixed
+        // layout holds for everyone else, and accessibility Dynamic Type users can reach the
+        // status readout instead of it being clipped under the bottom bar.
+        ScrollView {
+            VStack(spacing: 14) {
+                noticeZone
+                dial
+                sunHint
+                levelStatus
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .scrollBounceBehavior(.basedOnSize)
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Level")
         .navigationBarTitleDisplayMode(.inline)
@@ -192,20 +204,36 @@ struct LevelScanView: View {
         // The marker stabiliser heartbeat. A plain repeating task (not onChange of the plan)
         // because the whole point is to keep evaluating while the candidate is HOLDING a value —
         // onChange goes quiet exactly when we need to confirm stability. Cancelled with the view.
+        // It also feeds the audio coach: while guidance is running, the parking-sensor beeps
+        // quicken and rise as the vehicle approaches level — the drive is eyes-free by design.
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
                 stabilizeMarkers()
+                pushAudioState()
             }
         }
         // Deliberately NOT stopping motion here: the only push destination is the setup wizard,
         // whose calibrate step needs live readings — and push ordering can fire the wizard's
         // onAppear BEFORE our onDisappear, so a stop() here could freeze the wizard's motion
         // and let Re-calibrate bake a stale offset. Backgrounding suspends CoreMotion anyway.
-        .onDisappear { audio.stop() }
+        .onDisappear { audio.stop(); UIApplication.shared.isIdleTimerDisabled = false }
         .onChange(of: isLevel) { _, nowLevel in
-            if nowLevel && !wasLevel && armed { Haptics.levelReached(); audio.alertLevel() }
+            // One success haptic; the audio coach announces the stop tone itself (its ticker
+            // chimes once on reaching level while guidance is enabled — no double chime here).
+            // The state push happens HERE too, at sensor rate: the 500ms heartbeat alone
+            // could deliver the stop tone half a second late, or miss a fast pass entirely.
+            if nowLevel && !wasLevel && armed { Haptics.levelReached() }
             wasLevel = nowLevel
+            pushAudioState()
+        }
+        // Eyes-free guidance: the screen must not sleep mid-drive.
+        .onChange(of: armed) { _, on in
+            UIApplication.shared.isIdleTimerDisabled = on
+        }
+        // One success haptic when the sun locks on target.
+        .onChange(of: sunAligned) { was, now in
+            if now && !was { Haptics.sunAligned() }
         }
         .onChange(of: sunMoment) { _, moment in
             recomputeSunArc()
@@ -255,7 +283,7 @@ struct LevelScanView: View {
         }
         // The free "why buy Pro" moment — offered exactly when Pro would have helped.
         .confirmationDialog(
-            "Nice — you're level. Pro remembers this pitch and hands you the exact ramp recipe next time you're back.",
+            "Pro can remember this pitch and recall the exact setup next time you return.",
             isPresented: $showPitchTeaser, titleVisibility: .visible
         ) {
             Button("See what Pro does") { showPaywall = true }
@@ -275,9 +303,10 @@ struct LevelScanView: View {
                     // "3–4 taps" bug). Alert-backed dialogs are set once at presentation.
                     Button { showSunOptions = true } label: {
                         Image(systemName: sunMoment != nil ? "sun.max.fill" : "sun.max")
-                            .accessibilityLabel("Sun & shade planner")
+                            .accessibilityLabel(sunMoment.map { "Sun and shade — \($0.label) is on" }
+                                                ?? "Sun and shade")
                     }
-                    .confirmationDialog(sunDialogTitle, isPresented: $showSunOptions, titleVisibility: .visible) {
+                    .confirmationDialog("Sun and shade", isPresented: $showSunOptions, titleVisibility: .visible) {
                         ForEach(SunMoment.allCases) { moment in
                             // "(on)" not "✓" — VoiceOver reads a literal checkmark as "check mark".
                             Button(sunMoment == moment ? "\(moment.label) (on)" : moment.label) {
@@ -285,14 +314,16 @@ struct LevelScanView: View {
                             }
                         }
                         if sunMoment != nil {
-                            Button("Sun planner off", role: .destructive) { sunMoment = nil }
+                            Button("Off", role: .destructive) { sunMoment = nil }
                         }
                         Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Morning and evening aim the awning at the sun; midday positions it for shade.")
                     }
                 } else {
                     // Visible for free — the sun planner shouldn't be a secret. Tap = paywall.
                     Button { showPaywall = true } label: {
-                        Image(systemName: "sun.max").accessibilityLabel("Sun & shade planner — Pro")
+                        Image(systemName: "sun.max").accessibilityLabel("Sun and shade — Pro")
                     }
                 }
             }
@@ -304,65 +335,77 @@ struct LevelScanView: View {
 
     // MARK: - Notice zone (free for everyone — the ramp/affiliate coaching lives here)
 
-    @ViewBuilder private var noticeZone: some View {
-        VStack(spacing: 6) {
-            if isPro, windAlertsOn, wind.warning != nil {
-                // A live gust warning takes over the card slot entirely — same 116pt, so the
-                // fixed layout holds and nothing gets pushed off-screen. The coaching the card
-                // would have shown is duplicated on the dial (markers) and the readout, so for
-                // the duration of a blow the loudest thing on screen is the thing that matters.
-                windBanner
-            } else if !isPhoneFlatEnough {
-                // Not actually resting flat in the van (being held/checked) — an mm figure here
-                // would be nonsense (see the sanity clamp in `plan`), so ask for a flat read instead.
-                noticeCard(("iphone.gen3.radiowaves.left.and.right", Color(.secondaryLabel), "Lay the phone flat",
-                            "Rest it flat in the van, screen up, to read the ground's slope.", true),
-                           tappable: false)
-            } else if let plan {
-                let neededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
-                // !isLevel (the VIEW's 1.2° band) must gate this too: the plan's own tolerance is
-                // tighter (~0.3–0.6°), and in the disagreement band the card shows the green
-                // "Nailed it" — which must never secretly be a shop button.
-                let needsDriveUpRamp = !isLevel && !plan.isLevel && plan.canLevel && !usesPerWheelFlow && !armed
-                // The selling moments, kept honest: (a) your ramps can't reach AND a real product
-                // can (never a dead-end shop), or (b) we're coaching off rough defaults, so the
-                // user may own no ramps at all. Someone whose own ramps do the job isn't sold to.
-                let sellable = (!plan.canLevel && !ReferenceStore.shared.rampsReaching(mm: neededMM).isEmpty)
-                    || (needsDriveUpRamp && usingRoughDefaults)
-                if sellable {
-                    Button {
-                        shopNeededMM = neededMM
-                        showRampShop = true
-                    } label: {
-                        noticeCard(rampNotice(plan), tappable: true)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    noticeCard(rampNotice(plan), tappable: false)
-                }
+    // MARK: - Coach state machine (the one source of truth for what the screen says)
 
+    /// Every state the Level screen can be in. Exactly one coach message and at most one
+    /// primary action render per state — the brief's "one obvious action" rule.
+    private enum CoachState: Equatable {
+        case phoneInvalid
+        case pitchUnsafe(neededMM: Int)                                   // beyond every product
+        case equipmentInsufficient(reachMM: Int, neededMM: Int)           // taller ramps exist
+        case withinTolerance
+        case readyPerWheel
+        case rampsRequired(estimated: Bool)
+        case moving
+        case approachingLevel
+        case stopNow
+        case levelComplete
+    }
+
+    /// Inside this band (but not yet level) the coaching softens to "Almost level".
+    private static let approachBandDeg = 2.5
+
+    private var coachState: CoachState {
+        guard isPhoneFlatEnough, let plan else { return .phoneInvalid }
+        if armed {
+            if isLevel { return .stopNow }
+            return degOff <= Self.approachBandDeg ? .approachingLevel : .moving
+        }
+        if isLevel { return .levelComplete }
+        if !plan.canLevel {
+            let neededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
+            return ReferenceStore.shared.rampsReaching(mm: neededMM).isEmpty
+                ? .pitchUnsafe(neededMM: neededMM)
+                : .equipmentInsufficient(reachMM: effectiveRampSet.ceilingMM, neededMM: neededMM)
+        }
+        if usesPerWheelFlow { return .readyPerWheel }
+        if plan.ramps.isEmpty && shownMarkers.isEmpty { return .withinTolerance }
+        return .rampsRequired(estimated: usingRoughDefaults)
+    }
+
+    /// The lift figure the coach quotes — the same stabilised value the dial markers show,
+    /// rounded to 5 mm so copy never strobes at sensor rate.
+    private var coachLiftMM: Int {
+        let stabilised = shownMarkers.map(\.mm).max()
+        let live = plan.flatMap { p in p.ramps.map { $0.stepMM ?? $0.liftMM }.max() }
+        return roundedTo5(stabilised ?? live ?? 0)
+    }
+
+    private func roundedTo5(_ mm: Int) -> Int { ((mm + 2) / 5) * 5 }
+
+    @ViewBuilder private var noticeZone: some View {
+        VStack(spacing: DS.related) {
+            if isPro, windAlertsOn, let warning = wind.warning, !armed {
+                // A live gust warning replaces the coach panel — the loudest thing on screen
+                // is the thing that matters. NOT while guidance is running: a driver mid-drive
+                // must keep the moving/STOP instruction; the warning returns after they stop.
+                CoachPanel(role: warning.severe ? .windUrgent : .windWatch,
+                           icon: "wind",
+                           title: "Gusts to \(warning.peakMPH) mph around \(warning.timeLabel)",
+                           message: warning.severe ? "Bring the awning in." : "Keep an eye on the awning.")
+                    .accessibilityLabel("Wind warning. Gusts to \(warning.peakMPH) miles per hour around \(warning.timeLabel). \(warning.severe ? "Bring the awning in." : "Keep an eye on the awning.")")
+            } else {
+                coachPanel(for: coachState)
             }
 
-            // ONE always-reserved, constant-height sub-slot (fixed-layout contract: the dial
-            // must never move as tilt/GPS/armed state changes). At most one hint shows at a
-            // time — the pitch recall outranks the refine nudge; empty states keep the space.
+            // ONE always-reserved sub-slot: the saved-pitch recall, or empty space.
             Group {
                 if !armed, let near = nearbyPitch {
-                    // Pitch memory (Pro): you've levelled near here before — tap for the recipe.
                     Button { shownPitch = near.pitch } label: {
-                        Label("Saved pitch nearby — \(near.pitch.siteName.isEmpty ? "tap for last time's setup" : near.pitch.siteName)",
+                        Label("Saved pitch nearby — \(near.pitch.siteName.isEmpty ? "view last time's setup" : near.pitch.siteName)",
                               systemImage: "mappin.circle.fill")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                } else if isPhoneFlatEnough && usingRoughDefaults {
-                    // Straight to the measure step — no vehicle exists yet, but nobody needs
-                    // the language page to type two numbers.
-                    Button { setupMode = .firstRun; setupStart = 1; showSetup = true } label: {
-                        Label("≈ estimate — measure your van for exact figures", systemImage: "ruler")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -370,6 +413,63 @@ struct LevelScanView: View {
                 }
             }
             .frame(height: 22)
+        }
+    }
+
+    @ViewBuilder private func coachPanel(for state: CoachState) -> some View {
+        switch state {
+        case .phoneInvalid:
+            CoachPanel(role: .neutral, icon: "iphone.gen3",
+                       title: "Lay your phone flat",
+                       message: "Place it screen-up in the vehicle to measure the pitch.")
+        case .rampsRequired(let estimated):
+            if estimated {
+                CoachPanel(role: .action, icon: "arrow.up.circle.fill",
+                           title: "Place ramps at the highlighted wheels",
+                           message: "Estimated lift: \(coachLiftMM) mm. Add your vehicle measurements for greater accuracy.",
+                           secondaryTitle: "Add measurements",
+                           secondaryAction: { setupMode = .firstRun; setupStart = 1; showSetup = true })
+            } else {
+                CoachPanel(role: .action, icon: "arrow.up.circle.fill",
+                           title: "Place ramps at the highlighted wheels",
+                           message: "Required lift: about \(coachLiftMM) mm.")
+            }
+        case .equipmentInsufficient(let reach, let needed):
+            // Shopping stays OUT of the instruction: facts first, one separate secondary action.
+            CoachPanel(role: .unsafe, icon: "exclamationmark.triangle.fill",
+                       title: usingRoughDefaults ? "Typical ramps are not high enough"
+                                                 : "Your ramps are not high enough",
+                       message: "\(usingRoughDefaults ? "Most reach" : "They reach") \(reach) mm. This pitch requires about \(roundedTo5(needed)) mm. Move to a flatter spot, or use taller ramps.",
+                       secondaryTitle: "View suitable ramps",
+                       secondaryAction: { shopNeededMM = needed; showRampShop = true })
+        case .pitchUnsafe(let needed):
+            CoachPanel(role: .unsafe, icon: "exclamationmark.triangle.fill",
+                       title: "Move to a flatter spot",
+                       message: "Required lift: about \(roundedTo5(needed)) mm — beyond normal levelling-ramp limits.")
+        case .withinTolerance:
+            CoachPanel(role: .neutral, icon: "checkmark.circle",
+                       title: "This is as close as your ramps allow",
+                       message: "Your smallest step would not improve the result.")
+        case .readyPerWheel:
+            CoachPanel(role: .action, icon: "arrow.up.circle.fill",
+                       title: "Ready to level",
+                       message: "Place your levelling equipment under the highlighted wheels.")
+        case .moving:
+            CoachPanel(role: .action, icon: "waveform",
+                       title: "Move forward slowly",
+                       message: "Listen for the stop tone.")
+        case .approachingLevel:
+            CoachPanel(role: .action, icon: "waveform",
+                       title: "Almost level",
+                       message: "Continue slowly.")
+        case .stopNow:
+            CoachPanel(role: .unsafe, icon: "exclamationmark.octagon.fill",
+                       title: "STOP",
+                       message: "Vehicle level. Stop moving.")
+        case .levelComplete:
+            CoachPanel(role: .success, icon: "checkmark.circle.fill",
+                       title: "Vehicle level",
+                       message: "Apply the handbrake before leaving the driver's seat.")
         }
     }
 
@@ -383,108 +483,27 @@ struct LevelScanView: View {
         return (best.0, best.1)
     }
 
-    private func noticeCard(_ n: (icon: String, tint: Color, title: String, message: String, subtle: Bool),
-                            tappable: Bool) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: n.icon).font(.title3).foregroundStyle(n.tint)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(n.title).font(.callout.weight(.bold)).foregroundStyle(n.subtle ? Color(.label) : n.tint)
-                Text(n.message).font(.footnote).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-            if tappable {
-                Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
-            }
-        }
-        .padding(14)
-        .frame(height: 116, alignment: .topLeading)
-        .frame(maxWidth: .infinity)
-        .background(n.subtle ? Color(.secondarySystemGroupedBackground) : n.tint.opacity(0.14),
-                    in: RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func rampNotice(_ plan: LevelPlan)
-        -> (icon: String, tint: Color, title: String, message: String, subtle: Bool) {
-        let ceiling = effectiveRampSet.ceilingMM
-        let neededMM = plan.wheels.map { $0.liftMM }.max() ?? 0
-        // The COPY rounds to 5mm so it doesn't strobe "≈173/≈174" at sensor rate; product
-        // selection and the shop filter keep the raw figure.
-        let neededText = ((neededMM + 2) / 5) * 5
-        // "≈" flags a rough-default figure honestly; "~" just marks the normal rounding once
-        // the van's real size is known.
-        let approx = usingRoughDefaults ? "≈" : "~"
-        if !plan.canLevel {
-            // Calm, non-scolding copy — a stressed user reads this right before the Buy tap.
-            // Name the actual product + price: "ramps exist" doesn't sell, "£48 fixes this" does.
-            // Rough defaults = never claim "your ramps": they haven't told us they own any.
-            if let ramp = ReferenceStore.shared.rampsReaching(mm: neededMM).first {
-                let reach = usingRoughDefaults ? "Typical ramps reach \(ceiling)mm" : "Yours reach \(ceiling)mm"
-                return ("exclamationmark.triangle.fill", Theme.needsBigRamp,
-                        usingRoughDefaults ? "This spot's too steep for typical ramps" : "This spot's too steep for your ramps",
-                        "\(reach) — this needs \(approx)\(neededText)mm. \(ramp.name) (\(ramp.priceLabel)) covers it — tap to shop.", false)
-            }
-            // Nothing on the market reaches it: say so and DON'T open an empty shop.
-            return ("exclamationmark.triangle.fill", Theme.needsBigRamp, "This spot's too steep",
-                    "Needs \(approx)\(neededText)mm — beyond any levelling ramp. Best to move the van.", false)
-        }
-        if isLevel {
-            return ("checkmark.circle.fill", Theme.levelGreen, "Level — handbrake on", "Nailed it.", false)
-        }
-        // Wheel-by-wheel aids (inflatables / blocks / ratchets): place, then start the guided flow.
-        if usesPerWheelFlow {
-            let noun: String = {
-                switch effectiveRampSet.kind {
-                case .inflatable: return "air bags"
-                case .blocks: return "blocks"
-                default: return "levellers"
-                }
-            }()
-            return ("arrow.up.circle.fill", Theme.needsRamp, "Ready when you are",
-                    "Put your \(noun) under the low wheels, then tap Level wheel by wheel.", false)
-        }
-        // Drive-up ramps (stepped / wedge).
-        if !armed {
-            // Read the SAME stabilised markers the dial shows — on a step-boundary wobble the
-            // live plan strobes ~40↔~70 at sensor rate, and the card and the dial must never
-            // disagree in one glance. Falls back to the live plan only in the sub-second window
-            // before the stabiliser's first commit.
-            let stable: [(name: String, mm: Int)] = shownMarkers.isEmpty
-                ? plan.ramps.map { ($0.wheelName, $0.stepMM ?? $0.liftMM) }
-                : shownMarkers.map { ($0.name, $0.mm) }
-            // Big-custom-step edge: the plan can be "level enough for these ramps" while the
-            // dial still reads a degree off — no wheel needs a ramp, so say that, not "Ramp · ~0mm".
-            // Gated on the STABILISED list, not live plan.ramps, or this title flaps at the
-            // smallest-step tolerance boundary exactly like the markers used to.
-            guard !stable.isEmpty else {
-                return ("checkmark.circle", Color(.secondaryLabel), "Close enough for your ramps",
-                        "Your smallest step can't improve this — you're within its tolerance.", true)
-            }
-            let wheels = stable.map { $0.name }.joined(separator: " & ")
-            let step = stable.map { $0.mm }.max() ?? 0
-            // Rough defaults = we've never been told they own ramps — offer one, with a price.
-            // Product is chosen by neededMM (what the SHOP filters on), not the snapped step,
-            // so the card never promises a ramp the opened sheet then hides.
-            if usingRoughDefaults, let ramp = ReferenceStore.shared.rampsReaching(mm: neededMM).first {
-                return ("cart.fill", Theme.needsRamp, "Ramp \(wheels) · \(approx)\(step)mm",
-                        "No ramps yet? \(ramp.name) (\(ramp.priceLabel)) covers it — tap to shop. Got some? Drop them in and tap Start.", false)
-            }
-            return ("arrow.up.circle.fill", Theme.needsRamp, "Ramp \(wheels) · \(approx)\(step)mm",
-                    "Drop your ramps in front of those wheels, then tap Start.", false)
-        }
-        return ("waveform", Color(.secondaryLabel), "Drive up slowly",
-                "Watch the dial — a chime tells you the moment you're level.", true)
-    }
 
     // MARK: - The dial (nothing here changes SIZE; only colours/positions animate)
 
-    private var dial: some View {
-        let spyRed = Color(red: 0.98, green: 0.16, blue: 0.22)
-        let target: Color = isLevel ? Theme.levelGreen : spyRed   // level scope: red targeting → green lock
-        return ZStack {
-            Circle().fill(target.opacity(0.30)).frame(width: dialSize + 18, height: dialSize + 18).blur(radius: 12)
+    /// Red only when the state is genuinely unsafe (too steep / STOP), green only on
+    /// confirmed level, neutral the rest of the time — "not level yet" is not an emergency.
+    /// STOP is checked BEFORE the level short-circuit: at the stop moment the vehicle IS
+    /// level, and the red instruction has to win over the green congratulation.
+    private var dialTint: Color {
+        if coachState == .stopNow { return .red }
+        if isLevel { return .green }
+        switch coachState {
+        case .pitchUnsafe, .equipmentInsufficient: return .red
+        default: return Color(.systemGray)
+        }
+    }
 
-            // Your van from ABOVE (front up) as a white wireframe on a DARK targeting scope — the
-            // sniper-scope look. colorInvert flips the black-on-white drawing to white-on-black.
+    private var dial: some View {
+        let target = dialTint
+        return ZStack {
+            // Your van from ABOVE (front up) as a white wireframe on a DARK disc — the circular
+            // vehicle instrument is the product's identity; the neon glow around it is not.
             ZStack {
                 Color.black
                 Image("VanTop")
@@ -526,12 +545,27 @@ struct LevelScanView: View {
                 .fill(target)
                 .frame(width: 36, height: 36)
                 .overlay(Circle().stroke(.white.opacity(0.95), lineWidth: 2))
-                .shadow(color: target.opacity(0.9), radius: 9)
                 .offset(x: bubbleOffset.width, y: bubbleOffset.height)
-                .animation(.snappy(duration: 0.12), value: bubbleOffset)
+                .animation(reduceMotion ? nil : .snappy(duration: 0.12), value: bubbleOffset)
         }
         .frame(width: dialSize + 18, height: dialSize + 18)
         .frame(maxWidth: .infinity)
+        // VoiceOver gets one meaningful instrument summary, not thirty decorative layers.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(dialAccessibilitySummary)
+    }
+
+    private var dialAccessibilitySummary: String {
+        var parts: [String] = []
+        parts.append(isLevel ? "Vehicle level."
+                             : String(format: "Vehicle %.1f degrees off. %@.", degOff, levelDirection))
+        for marker in shownMarkers {
+            parts.append("\(marker.name) wheel: raise by \(marker.mm) millimetres.")
+        }
+        if isPro, sunMoment != nil {
+            parts.append(sunAligned ? "Sun marker aligned." : "Sun planner active — turn the vehicle until the sun marker reaches the top.")
+        }
+        return parts.joined(separator: " ")
     }
 
     /// The van as drawn on the dial, derived from the same MEASURED png constants as
@@ -634,25 +668,24 @@ struct LevelScanView: View {
                     .fill(Theme.needsRamp.opacity(0.85))
                     .frame(width: 26, height: 13)
             } else {
-                // Drive-up ramp: the WEDGE sits on the ground ahead of the wheel, and the
-                // pulsing chevron says "drive forward onto it" — no reading required.
+                // Drive-up ramp: the wedge sits on the ground ahead of the wheel, and the
+                // chevron says "drive forward onto it" — no reading required. The pulse is
+                // skipped under Reduce Motion.
                 RampWedge()
                     .fill(Theme.needsRamp)
                     .frame(width: 20, height: 12)
-                    .shadow(color: Theme.needsRamp.opacity(0.8), radius: 4)
                     .offset(y: -31)
                 Image(systemName: "chevron.compact.up")
                     .font(.system(size: 16, weight: .heavy))
                     .foregroundStyle(Theme.needsRamp)
-                    .symbolEffect(.pulse, options: .repeating)
+                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
                     .offset(y: -17)
             }
             Circle().fill(Theme.needsRamp)
                 .frame(width: 14, height: 14)
                 .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
-                .shadow(color: Theme.needsRamp.opacity(0.9), radius: 6)
-            Text("\(usingRoughDefaults ? "≈" : "+")\(mm)")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+            Text("+\(mm)")
+                .font(.system(size: 11, weight: .heavy, design: .rounded).monospacedDigit())
                 .foregroundStyle(Theme.needsRamp)
                 .padding(.horizontal, 5).padding(.vertical, 1)
                 .background(.black.opacity(0.55), in: Capsule())
@@ -661,52 +694,23 @@ struct LevelScanView: View {
         .offset(x: x, y: y)
     }
 
-    /// The wind warning, sized like it matters: a full-width solid banner filling the same
-    /// 116pt slot as the coach card — amber for "watch it", red for "bring it in". The first
-    /// version was a caption-sized capsule under the dial and the tester's verdict was "wind is
-    /// a tiny line, need a big warning across the screen"; a first fix that ADDED a banner row
-    /// blew the fixed height budget and shoved the LEVEL readout under the bottom bar, so it
-    /// takes the card slot over instead — same footprint, zero reflow.
-    @ViewBuilder private var windBanner: some View {
-        if let warning = wind.warning {
-            let tone = warning.severe ? Theme.needsBigRamp : Theme.needsRamp
-            HStack(spacing: 14) {
-                Image(systemName: "wind")
-                    .font(.system(size: 34, weight: .black))
-                    .symbolEffect(.pulse, options: .repeating)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Gusts to \(warning.peakMPH) mph ~\(warning.timeLabel)")
-                        .font(.title3.weight(.black))
-                        .lineLimit(1).minimumScaleFactor(0.75)
-                    Text(warning.severe ? "Bring the awning in" : "Watch the awning")
-                        .font(.headline.weight(.bold))
-                        .opacity(0.94)
-                }
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(.white)
-            .padding(14)
-            .frame(height: 116)
-            .frame(maxWidth: .infinity)
-            .background(tone, in: RoundedRectangle(cornerRadius: 14))
-            .shadow(color: tone.opacity(0.4), radius: 8, y: 3)
-        }
-    }
-
     /// Opt-in hints — shown BELOW the dial (not overlapping it): the sun caption when the
     /// planner's on, and a small reminder when the sleep tilt is shifting the target.
+    /// Guidance must never truncate, so these wrap instead of clipping.
     @ViewBuilder private var sunHint: some View {
         VStack(spacing: 5) {
             if isPro, let moment = sunMoment {
                 Text(sunHintText(moment))
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
             }
             if sleepHeadEnd != .off {
-                Label("Sleep tilt — \(sleepHeadEnd.label.lowercased())", systemImage: "bed.double.fill")
-                    .font(.caption2.weight(.semibold))
+                Label("Sleep tilt · \(sleepHeadEnd.label.lowercased())", systemImage: "bed.double.fill")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10).padding(.vertical, 4)
                     .background(.ultraThinMaterial, in: Capsule())
@@ -721,21 +725,21 @@ struct LevelScanView: View {
         if config == nil { return "Measure your van first — the planner needs your awning side" }
         if location.latitude == nil { return "Finding your location…" }
         if let s = sunPosition, !s.isUp {
-            // Only really reachable for "Sun now" at night — the timed presets roll forward
+            // Only really reachable for "Now" at night — the timed presets roll forward
             // to tomorrow (bySettingHour searches ahead), which is what an overnight parker wants.
             return moment == .now
-                ? "Sun's set — pick Morning sun to plan tomorrow's pitch"
-                : "Sun's below the horizon for \(moment.goal)"
+                ? "The sun has set. Choose a time for tomorrow."
+                : "The sun is below the horizon for \(moment.goal)."
         }
-        if location.headingDeg == nil { return "Waking the compass — wave the phone in a figure-8" }
+        if location.headingDeg == nil { return "Calibrating the compass — move the phone in a figure eight." }
         if sunRel == nil { return "Finding your position…" }
         // If the preset's time already passed today, we're planning TOMORROW's sun — say so.
         let planningTomorrow = moment != .now && !Calendar.current.isDateInToday(moment.date())
         let goal = planningTomorrow ? "tomorrow's \(moment.goal)" : moment.goal
-        if sunAligned { return "☀ Facing \(goal) — good spot" }
+        if sunAligned { return "Positioned for \(goal)." }
         return moment == .now
-            ? "Turn the van until ☀ reaches the top"
-            : "Turn the van until ☀ reaches the top — \(goal)"
+            ? "Turn the vehicle until the sun marker reaches the top."
+            : "Turn the vehicle until the sun marker reaches the top — \(goal)."
     }
 
     private var bubbleOffset: CGSize {
@@ -783,18 +787,17 @@ struct LevelScanView: View {
         }
     }
 
-    // MARK: - Level status (fixed height)
+    // MARK: - Level status
 
     private var levelStatus: some View {
-        VStack(spacing: 4) {
-            Text(isLevel ? "LEVEL" : String(format: "%.1f° off", degOff))
-                .font(.system(size: 46, weight: .heavy, design: .rounded))
-                .foregroundStyle(isLevel ? Theme.levelGreen : Color(.label))
-                .contentTransition(.numericText())
-            Text(isLevel ? "Stop — handbrake on." : levelDirection)
-                .font(.subheadline).foregroundStyle(.secondary)
-        }
-        .frame(height: 92)
+        // One success message per screen: the coach panel announces "Vehicle level", so the
+        // instrument shows the state word quietly. STOP is the only permitted capitals.
+        let stop = coachState == .stopNow
+        return StatusSummary(
+            value: stop ? "STOP" : (isLevel ? "Level" : String(format: "%.1f° off", degOff)),
+            detail: isLevel ? "" : levelDirection,
+            valueColor: stop ? .red : (isLevel ? .green : Color(.label))
+        )
     }
 
     private var levelDirection: String {
@@ -802,67 +805,109 @@ struct LevelScanView: View {
         var parts: [String] = []
         if abs(effPitchDeg) > 0.3 { parts.append(effPitchDeg > 0 ? "nose high" : "nose low") }
         if abs(effRollDeg) > 0.3 { parts.append(effRollDeg > 0 ? "left high" : "right high") }
-        return parts.isEmpty ? "almost there" : parts.joined(separator: " · ")
+        guard let first = parts.first else { return "Almost level" }
+        return (first.prefix(1).uppercased() + first.dropFirst())
+            + (parts.count > 1 ? " · " + parts[1] : "")
     }
 
-    // MARK: - Bottom bar
+    // MARK: - Bottom bar (one primary action per state — or none)
 
     @ViewBuilder private var bottomBar: some View {
         Group {
-            if usesPerWheelFlow {
-                // Air/blocks/ratchet ramps are the one Pro gate — it sits at this exact tap,
-                // not in front of the free coaching that got the user here.
-                Button {
+            switch coachState {
+            case .readyPerWheel:
+                PrimaryBottomAction(title: isPro ? "Guide me wheel by wheel" : "Guide me wheel by wheel — Pro",
+                                    icon: isPro ? "scope" : "lock.fill") {
                     if isPro { showInflateGuide = true } else { showPaywall = true }
-                } label: {
-                    Label(isPro ? "Level wheel by wheel" : "Level wheel by wheel — Pro",
-                          systemImage: isPro ? "scope" : "lock.fill")
-                        .font(.headline).frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(isPro ? Color.accentColor : Theme.proBadge)
-            } else if !armed {
-                Button {
-                    armed = true
-                    wasLevel = isLevel
-                    armPlan = plan   // the "recipe" — by Done the tilt reads zero, so snapshot now
-                } label: {
-                    Label("Start levelling", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)
+            case .rampsRequired, .withinTolerance:
+                PrimaryBottomAction(title: "Start guidance", icon: "scope") {
+                    startGuidance()
                 }
-                .buttonStyle(.borderedProminent)
-            } else {
-                Button {
-                    let finishedLevel = isLevel
-                    armed = false
-                    if finishedLevel {
-                        if isPro {
-                            maybeOfferPitchSave()
-                        } else {
-                            // The one Pro tease on the free path — at the exact moment pitch
-                            // memory would have earned its keep. Dismissible, shown at most
-                            // once per session, zero cost to the funnel.
-                            armPlan = nil
-                            if !pitchTeaserShown {
-                                pitchTeaserShown = true
-                                showPitchTeaser = true
-                            }
-                        }
-                    } else {
-                        armPlan = nil
-                    }
-                } label: {
-                    Label(isLevel ? "Done — you're level" : "Stop",
-                          systemImage: isLevel ? "checkmark.circle.fill" : "xmark")
-                        .font(.headline).frame(maxWidth: .infinity)
+            case .moving, .approachingLevel:
+                PrimaryBottomAction(title: "Stop", icon: "xmark", isProminent: false) {
+                    endGuidance()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(isLevel ? Theme.levelGreen : Color.accentColor)
+            case .phoneInvalid where armed:
+                // Guidance is running but the phone was picked up — the user must always be
+                // able to end an active drive, whatever the sensors say.
+                PrimaryBottomAction(title: "Stop", icon: "xmark", isProminent: false) {
+                    endGuidance()
+                }
+            case .stopNow:
+                PrimaryBottomAction(title: "Done", icon: "checkmark.circle.fill") {
+                    endGuidance()
+                }
+            default:
+                // No valid action in this state (phone not flat, too steep, already level).
+                // A hidden ghost of the real button keeps the bar's height IDENTICAL across
+                // states at every Dynamic Type size — a fixed number drifts as text scales.
+                PrimaryBottomAction(title: "Start guidance", icon: "scope") {}
+                    .hidden()
+                    .accessibilityHidden(true)
             }
         }
-        .controlSize(.large)
         .frame(maxWidth: .infinity)
         .padding()
         .background(.bar)
+        // One first-run safety confirmation before the first ever guided drive.
+        .confirmationDialog(
+            "Do not hold or operate the phone while moving the vehicle.",
+            isPresented: $showMovementSafety, titleVisibility: .visible
+        ) {
+            // The warning is only marked as seen when the user CONFIRMS it — cancelling
+            // means it shows again next time, not never again.
+            Button("Start guidance") { movementSafetyShown = true; arm() }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func startGuidance() {
+        if movementSafetyShown {
+            arm()
+        } else {
+            showMovementSafety = true
+        }
+    }
+
+    private func arm() {
+        armed = true
+        wasLevel = isLevel
+        armPlan = plan   // the "recipe" — by Done the tilt reads zero, so snapshot now
+        pushAudioState()
+    }
+
+    /// Feed the audio coach the current state. Called from the 500ms heartbeat AND at sensor
+    /// rate on level-crossings, so the stop tone lands the moment the vehicle reaches level.
+    /// Silent when the phone isn't lying flat: plan is nil then, and offMM 0 would otherwise
+    /// read as "nearly level" and beep at maximum rate mid-pickup.
+    private func pushAudioState() {
+        audio.update(offMM: Double(plan?.wheels.map { $0.liftMM }.max() ?? 0),
+                     toleranceMM: 20,
+                     isLevel: isLevel,
+                     beyond: false,
+                     enabled: armed && !usesPerWheelFlow && isPhoneFlatEnough)
+    }
+
+    private func endGuidance() {
+        let finishedLevel = isLevel
+        armed = false
+        if finishedLevel {
+            if isPro {
+                maybeOfferPitchSave()
+            } else {
+                // The one Pro mention on the free path — at the exact moment pitch memory
+                // would have earned its keep. Dismissible, shown at most once per session.
+                armPlan = nil
+                if !pitchTeaserShown {
+                    pitchTeaserShown = true
+                    showPitchTeaser = true
+                }
+            }
+        } else {
+            armPlan = nil
+        }
+        pushAudioState()   // silence the coach immediately, not at the next heartbeat
     }
 
     // MARK: - Toolbar menus
@@ -873,11 +918,8 @@ struct LevelScanView: View {
         // button next door (testers pressed the wrong icon). Plain calibrate button again.
         Button { showCalibrate = true } label: {
             Image(systemName: motion.isCalibrated ? "scope" : "exclamationmark.triangle")
+                .accessibilityLabel(motion.isCalibrated ? "Calibrate" : "Calibrate — not yet calibrated")
         }
-    }
-
-    private var sunDialogTitle: String {
-        sunMoment.map { "Sun & shade planner — \($0.label) is on" } ?? "Sun & shade planner"
     }
 
     /// Runs whatever a Settings row asked for, once the sheet is fully gone.

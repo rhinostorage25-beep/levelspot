@@ -71,15 +71,18 @@ struct CoachPanel: View {
                     Button(action: secondaryAction) {
                         Text(secondaryTitle)
                             .font(.footnote.weight(.semibold))
+                            .frame(minHeight: 44, alignment: .leading)   // real 44pt hit target
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
-                    .padding(.top, DS.micro)
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(DS.content)
-        .frame(minHeight: floorHeight, alignment: .topLeading)
+        // The floor exists to stop state-to-state reflow, not to reserve half the screen:
+        // past ~2× the base size the content itself drives the height.
+        .frame(minHeight: min(floorHeight, 232), alignment: .topLeading)
         .frame(maxWidth: .infinity)
         .background(role.isSolid ? AnyShapeStyle(role.tint)
                                  : role == .neutral
@@ -135,11 +138,14 @@ struct StatusSummary: View {
     var valueColor: Color = Color(.label)
 
     @ScaledMetric(relativeTo: .largeTitle) private var floorHeight: CGFloat = 92
+    // Scales with Dynamic Type in lockstep with the floor — a hard-coded 44 stayed small
+    // while the detail line grew, inverting the hierarchy exactly for low-vision users.
+    @ScaledMetric(relativeTo: .largeTitle) private var valueSize: CGFloat = 44
 
     var body: some View {
         VStack(spacing: DS.micro) {
             Text(value)
-                .font(.system(size: 44, weight: .bold, design: .rounded).monospacedDigit())
+                .font(.system(size: valueSize, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(valueColor)
                 .lineLimit(1)
             Text(detail)
@@ -147,7 +153,7 @@ struct StatusSummary: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(minHeight: floorHeight)
+        .frame(minHeight: min(floorHeight, 184))
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
     }
