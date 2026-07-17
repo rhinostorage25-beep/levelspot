@@ -133,15 +133,29 @@ struct ARMeasureView: View {
         }
     }
 
+    /// What a real vehicle can measure (§12 plausibility): outside this, warn — but let the
+    /// user decide. A compact camper and an American RV both fit; two taps on the same wheel
+    /// don't.
+    private var plausibleRange: ClosedRange<Int> { kind == .wheelbase ? 1800...5500 : 1200...2400 }
+
     @ViewBuilder private var buttonRow: some View {
         if model.phase == .done, let mm = model.resultMM {
-            HStack(spacing: 12) {
-                Button("Measure again") { model.redo() }
-                    .buttonStyle(.bordered).tint(.white)
-                Button("Use \(mm) mm") { onConfirm(mm); dismiss() }
-                    .buttonStyle(.borderedProminent)
+            VStack(spacing: 10) {
+                if !plausibleRange.contains(mm) {
+                    Text("This looks unusual for a \(kind == .wheelbase ? "wheelbase" : "track width") — check the measurement.")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(8).background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+                }
+                HStack(spacing: 12) {
+                    Button("Measure again") { model.redo() }
+                        .buttonStyle(.bordered).tint(.white)
+                    Button("Use \(mm) mm") { onConfirm(mm); dismiss() }
+                        .buttonStyle(.borderedProminent)
+                }
+                .controlSize(.large)
             }
-            .controlSize(.large)
         } else {
             HStack(spacing: 12) {
                 Button("Cancel") { dismiss() }

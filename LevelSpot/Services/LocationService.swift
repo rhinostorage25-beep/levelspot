@@ -8,6 +8,9 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     private(set) var longitude: Double?
     private(set) var headingDeg: Int?
     private(set) var authorized = false
+    /// Explicitly refused (or restricted by parental controls) — distinct from "not asked
+    /// yet", because the fix lives in the Settings app and the UI should say so.
+    private(set) var denied = false
 
     private let manager = CLLocationManager()
 
@@ -32,7 +35,11 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
             manager.requestWhenInUseAuthorization()
         case .authorizedWhenInUse, .authorizedAlways:
             authorized = true
+            denied = false
             manager.startUpdatingLocation()
+        case .denied, .restricted:
+            authorized = false
+            denied = true
         default:
             authorized = false
         }

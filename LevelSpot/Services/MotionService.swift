@@ -20,6 +20,9 @@ final class MotionService: SensorSource {
     /// False while the vehicle is moving/being rocked — the scan shows lower confidence.
     private(set) var isSteady: Bool = true
     private(set) var isRunning = false
+    /// True when this device simply has no usable motion hardware. The Level screen must say
+    /// so — silently showing 0.0° would read as "vehicle level" on no data at all.
+    private(set) var sensorUnavailable = false
 
     private let manager = CMMotionManager()
     private let defaults = UserDefaults.standard
@@ -36,7 +39,13 @@ final class MotionService: SensorSource {
     }
 
     func start() {
-        guard manager.isDeviceMotionAvailable, !isRunning else { return }
+        guard manager.isDeviceMotionAvailable else {
+            #if !targetEnvironment(simulator)
+            sensorUnavailable = true
+            #endif
+            return
+        }
+        guard !isRunning else { return }
         isRunning = true
         manager.deviceMotionUpdateInterval = 1.0 / 10.0
         manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in

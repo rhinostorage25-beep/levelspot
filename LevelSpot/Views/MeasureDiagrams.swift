@@ -181,6 +181,8 @@ struct VanPhoto: View {
 struct CalibrateView: View {
     @Environment(MotionService.self) private var motion
     @Environment(\.dismiss) private var dismiss
+    // Value-critical text scales with Dynamic Type like every other reading in the app.
+    @ScaledMetric(relativeTo: .largeTitle) private var tiltValueSize: CGFloat = 32
 
     private var degOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
     private var looksOff: Bool { degOff > 8 }
@@ -207,7 +209,7 @@ struct CalibrateView: View {
 
                     VStack(spacing: 4) {
                         Text(String(format: "Current tilt: %.1f°", degOff))
-                            .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
+                            .font(.system(size: tiltValueSize, weight: .bold, design: .rounded).monospacedDigit())
                             .foregroundStyle(looksOff ? Theme.needsBigRamp : Color(.label))
                             .contentTransition(.numericText())
                         if !looksOff {

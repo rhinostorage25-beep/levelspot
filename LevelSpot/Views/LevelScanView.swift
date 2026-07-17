@@ -230,6 +230,13 @@ struct LevelScanView: View {
         .onChange(of: sunAligned) { was, now in
             if now && !was { Haptics.sunAligned() }
         }
+        // A red gust warning must reach VoiceOver users without them touching the screen.
+        .onChange(of: wind.warning) { old, new in
+            if let new, new.severe, old?.severe != true {
+                UIAccessibility.post(notification: .announcement,
+                                     argument: "Wind warning. Gusts to \(new.peakMPH) miles per hour around \(new.timeLabel). Bring the awning in.")
+            }
+        }
         .onChange(of: sunMoment) { _, moment in
             recomputeSunArc()
             // Compass only while the planner's on (see LocationService.startHeading).
@@ -335,6 +342,7 @@ struct LevelScanView: View {
     /// Every state the Level screen can be in. Exactly one coach message and at most one
     /// primary action render per state — the brief's "one obvious action" rule.
     private enum CoachState: Equatable {
+        case sensorUnavailable
         case phoneInvalid
         case pitchUnsafe(neededMM: Int)                                   // beyond every product
         case equipmentInsufficient(reachMM: Int, neededMM: Int)           // taller ramps exist
@@ -351,6 +359,9 @@ struct LevelScanView: View {
     private static let approachBandDeg = 2.5
 
     private var coachState: CoachState {
+        // No motion hardware = no readings at all: never let zeroed values masquerade
+        // as "Vehicle level". Levelling cannot run; everything else still works.
+        guard !motion.sensorUnavailable else { return .sensorUnavailable }
         guard isPhoneFlatEnough, let plan else { return .phoneInvalid }
         if armed {
             if isLevel { return .stopNow }
@@ -413,6 +424,10 @@ struct LevelScanView: View {
 
     @ViewBuilder private func coachPanel(for state: CoachState) -> some View {
         switch state {
+        case .sensorUnavailable:
+            CoachPanel(role: .neutral, icon: "exclamationmark.triangle",
+                       title: "Tilt sensor unavailable",
+                       message: "This device can't read tilt, so levelling guidance can't run. The sun planner and your saved pitches still work.")
         case .phoneInvalid:
             CoachPanel(role: .neutral, icon: "iphone.gen3",
                        title: "Lay your phone flat",
@@ -711,6 +726,7 @@ struct LevelScanView: View {
         // never-calibrated compass behind the same words as a pending GPS fix. And the planner
         // literally cannot aim without knowing the awning side, so say THAT when it's the gap.
         if config == nil { return "Measure your vehicle first — the planner needs your awning side." }
+        if location.denied { return "Allow location access in the Settings app to use the sun planner." }
         if location.latitude == nil { return "Finding your location…" }
         if let s = sunPosition, !s.isUp {
             // Only really reachable for "Now" at night — the timed presets roll forward
@@ -765,12 +781,12 @@ struct LevelScanView: View {
                 Image(systemName: "sun.max.fill")
                     .font(.system(size: sunAligned ? 34 : 30))
                     .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
-                    .shadow(color: (sunAligned ? Theme.levelGreen : Theme.sun).opacity(0.95), radius: sunAligned ? 10 : 7)
+                    .shadow(color: (sunAligned ? Theme.levelGreen : Theme.sun).opacity(0.6), radius: 4)
                     .offset(y: -(dialSize / 2) + 28)
             }
             .frame(width: dialSize, height: dialSize)
             .rotationEffect(.degrees(rel))
-            .animation(.snappy, value: rel)
+            .animation(reduceMotion ? nil : .snappy, value: rel)
         }
     }
 
@@ -780,10 +796,11 @@ struct LevelScanView: View {
         // One success message per screen: the coach panel announces "Vehicle level", so the
         // instrument shows the state word quietly. STOP is the only permitted capitals.
         let stop = coachState == .stopNow
+        let noSensor = coachState == .sensorUnavailable
         return StatusSummary(
-            value: stop ? "STOP" : (isLevel ? "Level" : String(format: "%.1f° off", degOff)),
-            detail: isLevel ? "" : levelDirection,
-            valueColor: stop ? .red : (isLevel ? .green : Color(.label))
+            value: noSensor ? "—" : stop ? "STOP" : (isLevel ? "Level" : String(format: "%.1f° off", degOff)),
+            detail: noSensor ? "No tilt data" : isLevel ? "" : levelDirection,
+            valueColor: stop ? .red : (isLevel && !noSensor ? .green : Color(.label))
         )
     }
 

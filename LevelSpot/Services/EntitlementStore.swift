@@ -117,9 +117,20 @@ final class EntitlementStore {
     }
 
     /// Restore prior purchases — required by App Store review for non-consumables.
+    /// Says what happened either way: a silent failure and a silent "nothing found"
+    /// are indistinguishable from a broken button.
     func restore() async {
-        try? await AppStore.sync()
+        lastError = nil
+        do {
+            try await AppStore.sync()
+        } catch {
+            lastError = "Restore didn't complete — check your connection and try again."
+            return
+        }
         await updateEntitlement()
+        if !isPro {
+            lastError = "No previous purchase was found for this Apple ID."
+        }
     }
 
     private func apply(_ verification: VerificationResult<Transaction>) async {

@@ -15,6 +15,8 @@ struct InflationGuideView: View {
 
     @Environment(MotionService.self) private var motion
     @Environment(\.dismiss) private var dismiss
+    // Value-critical text scales with Dynamic Type like every other reading in the app.
+    @ScaledMetric(relativeTo: .largeTitle) private var gaugeValueSize: CGFloat = 34
 
     @State private var audio = AudioCoach()
     @State private var selected: Corner?
@@ -177,7 +179,7 @@ struct InflationGuideView: View {
             Text("\(verb) \(c.label)")
                 .font(.headline)
             Text("\(Int(remaining.rounded())) mm to go")
-                .font(.system(size: 34, weight: .heavy, design: .rounded))
+                .font(.system(size: gaugeValueSize, weight: .heavy, design: .rounded).monospacedDigit())
                 .foregroundStyle(remaining < tolMM ? Theme.levelGreen : Color(.label))
                 .contentTransition(.numericText())
             switch kind {

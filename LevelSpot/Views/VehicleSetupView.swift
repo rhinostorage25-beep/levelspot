@@ -124,6 +124,12 @@ struct VehicleSetupView: View {
         }
     }
 
+    /// What a real vehicle can measure (§12 plausibility). Warn outside these, never block —
+    /// the user knows their vehicle; a silent typo corrupting every lift figure is the enemy.
+    private func plausibleRange(for target: MeasureTarget) -> ClosedRange<Int> {
+        target == .wheelbase ? 1800...5500 : 1200...2400
+    }
+
     private func measureField(diagram: AnyView, label: String, placeholder: String,
                               text: Binding<String>, target: MeasureTarget, hint: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -136,6 +142,12 @@ struct VehicleSetupView: View {
             }
             .buttonStyle(.bordered).controlSize(.small)
             Text(hint).font(.caption2).foregroundStyle(.secondary)
+            if let value = Int(text.wrappedValue), !plausibleRange(for: target).contains(value) {
+                Label("This looks unusual — check the measurement.", systemImage: "questionmark.circle")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Theme.needsRamp)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding()
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))

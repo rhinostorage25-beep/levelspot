@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UserNotifications
 import LevelSpotCore
 
 // The Pro pack — sun presets, wind alerts, and pitch memory. All of it is
@@ -186,6 +187,9 @@ struct SettingsSheet: View {
     // a 0.5° pillow target made level ground look mis-calibrated, trust costs more than comfort)
 
     @AppStorage("windAlertsOn") private var windAlertsOn = true
+    // Denied notification permission would otherwise silently break the away-from-app half
+    // of a paid feature while the toggle reads On — the footer must say what happened.
+    @State private var notificationsDenied = false
 
     @ViewBuilder private var comfortSection: some View {
         Section {
@@ -205,7 +209,13 @@ struct SettingsSheet: View {
         } header: {
             Text("Comfort")
         } footer: {
-            Text("Get an alert when forecast gusts may threaten your awning.")
+            Text(isPro && windAlertsOn && notificationsDenied
+                 ? "Get an alert when forecast gusts may threaten your awning. Notifications are off for LevelSpot — allow them in the Settings app to be warned when the app is closed. On-screen warnings still work."
+                 : "Get an alert when forecast gusts may threaten your awning.")
+        }
+        .task {
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            notificationsDenied = settings.authorizationStatus == .denied
         }
     }
 
