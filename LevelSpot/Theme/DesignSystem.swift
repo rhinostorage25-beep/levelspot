@@ -137,7 +137,10 @@ struct StatusSummary: View {
     let detail: String
     var valueColor: Color = Color(.label)
 
-    @ScaledMetric(relativeTo: .largeTitle) private var floorHeight: CGFloat = 92
+    // 72, not 92: the floor only needs to cover the value+detail pair's natural height so
+    // state changes don't reflow — anything taller pushes the readout under the bottom bar
+    // on a 6.1-inch screen when the sun caption wraps.
+    @ScaledMetric(relativeTo: .largeTitle) private var floorHeight: CGFloat = 72
     // Scales with Dynamic Type in lockstep with the floor — a hard-coded 44 stayed small
     // while the detail line grew, inverting the hierarchy exactly for low-vision users.
     @ScaledMetric(relativeTo: .largeTitle) private var valueSize: CGFloat = 44

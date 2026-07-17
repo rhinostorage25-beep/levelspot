@@ -180,13 +180,17 @@ struct LevelScanView: View {
         // layout holds for everyone else, and accessibility Dynamic Type users can reach the
         // status readout instead of it being clipped under the bottom bar.
         ScrollView {
-            VStack(spacing: 14) {
+            // Spacing/padding are tight on purpose: with a two-line sun caption AND the
+            // saved-pitch hint showing, the stack must still fit a 6.1-inch screen at
+            // default type — a readout half-hidden under the bottom bar reads as broken.
+            VStack(spacing: 10) {
                 noticeZone
                 dial
                 sunHint
                 levelStatus
             }
-            .padding()
+            .padding(.horizontal)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .scrollBounceBehavior(.basedOnSize)
