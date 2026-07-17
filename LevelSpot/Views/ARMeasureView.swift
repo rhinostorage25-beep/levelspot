@@ -9,14 +9,26 @@ enum MeasureKind {
 
     var title: String { self == .wheelbase ? "Measure wheelbase" : "Measure track width" }
 
-    func instruction(placingFirst: Bool) -> String {
+    /// "Front wheel · 1 of 2" — which point the user is placing, said plainly.
+    func stepLabel(placingFirst: Bool) -> String {
         switch (self, placingFirst) {
-        case (.wheelbase, true):  return "Sweep the phone over the ground first, then aim at the GROUND right where the FRONT wheel touches it, and tap Set."
-        case (.wheelbase, false): return "Walk to the REAR wheel, aim at the GROUND where it touches, then tap Set."
-        case (.track, true):      return "Aim at the GROUND at the base of ONE wheel on this axle, then tap Set — you don't need both wheels in view."
-        case (.track, false):     return "Walk round to the OTHER wheel on the same axle, aim at the GROUND at its base, then tap Set."
+        case (.wheelbase, true):  return "Front wheel · 1 of 2"
+        case (.wheelbase, false): return "Rear wheel · 2 of 2"
+        case (.track, true):      return "First wheel · 1 of 2"
+        case (.track, false):     return "Other wheel · 2 of 2"
         }
     }
+
+    func instruction(placingFirst: Bool) -> String {
+        switch (self, placingFirst) {
+        case (.wheelbase, true):  return "Scan the ground, then aim directly below the centre of the front wheel."
+        case (.wheelbase, false): return "Move to the rear wheel and aim directly below its centre."
+        case (.track, true):      return "Aim directly below the centre of one wheel on this axle."
+        case (.track, false):     return "Move to the other wheel on this axle and aim directly below its centre."
+        }
+    }
+
+    var resultLabel: String { self == .wheelbase ? "Wheelbase measured" : "Track width measured" }
 }
 
 /// Point-to-point AR measurement (ARKit world tracking + plane raycast — the Apple Measure app
@@ -69,12 +81,24 @@ struct ARMeasureView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .accessibilityHidden(true)
 
+                if model.phase != .done {
+                    Text(kind.stepLabel(placingFirst: model.phase == .first))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.8))
+                }
                 Text(model.phase == .done
-                     ? "Happy with it? Use the figure, or redo."
+                     ? kind.resultLabel
                      : kind.instruction(placingFirst: model.phase == .first))
                     .font(.callout.weight(.medium))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.phase == .done {
+                    // Honest precision: this is a camera estimate, not a tape measure.
+                    Text("Camera estimate · approximately ±20 mm")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
             }
             .padding(12)
             .frame(maxWidth: .infinity)
@@ -94,11 +118,11 @@ struct ARMeasureView: View {
                         .padding(.horizontal, 16).padding(.vertical, 8)
                         .background(.black.opacity(0.55), in: Capsule())
                 } else if model.hasHit {
-                    Text("Ready — line up the cross and tap Set.")
-                        .font(.footnote).foregroundStyle(.white.opacity(0.85))
+                    Text("Ground found")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(.white)
                         .padding(8).background(.black.opacity(0.45), in: Capsule())
                 } else {
-                    Text("Move the phone slowly to find the surface…")
+                    Text("Keep scanning — move the phone slowly over the ground")
                         .font(.footnote).foregroundStyle(.white.opacity(0.85))
                         .padding(8).background(.black.opacity(0.45), in: Capsule())
                 }
@@ -112,7 +136,7 @@ struct ARMeasureView: View {
     @ViewBuilder private var buttonRow: some View {
         if model.phase == .done, let mm = model.resultMM {
             HStack(spacing: 12) {
-                Button("Redo") { model.redo() }
+                Button("Measure again") { model.redo() }
                     .buttonStyle(.bordered).tint(.white)
                 Button("Use \(mm) mm") { onConfirm(mm); dismiss() }
                     .buttonStyle(.borderedProminent)
@@ -122,7 +146,9 @@ struct ARMeasureView: View {
             HStack(spacing: 12) {
                 Button("Cancel") { dismiss() }
                     .buttonStyle(.bordered).tint(.white)
-                Button(model.phase == .first ? "Set first point" : "Set second point") { model.place() }
+                Button(kind == .wheelbase
+                       ? (model.phase == .first ? "Set front point" : "Set rear point")
+                       : (model.phase == .first ? "Set first point" : "Set second point")) { model.place() }
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.hasHit)
             }
@@ -133,10 +159,10 @@ struct ARMeasureView: View {
     private var unsupported: some View {
         VStack(spacing: 14) {
             Image(systemName: "camera.metering.unknown").font(.largeTitle).foregroundStyle(.secondary)
-            Text("Camera measuring isn't available on this device.").font(.headline)
-            Text("No problem — type the figure in by hand instead. A tape measure between the centre of the two wheels does the job.")
+            Text("Camera measurement unavailable").font(.headline)
+            Text("Enter the measurement manually instead. Measure between the centres of the wheels.")
                 .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Button("Close") { dismiss() }.buttonStyle(.borderedProminent).padding(.top, 4)
+            Button("Enter manually") { dismiss() }.buttonStyle(.borderedProminent).padding(.top, 4)
         }
         .padding(32)
     }

@@ -67,23 +67,28 @@ struct InflationGuideView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                Text("Raise the low wheels one at a time. The highest corner stays put — that's your reference.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+            // ScrollView that doesn't scroll at standard sizes: the guidance card grows with
+            // its content (min-height keeps the anti-reflow floor) and accessibility Dynamic
+            // Type users can still reach everything instead of the card clipping.
+            ScrollView {
+                VStack(spacing: 20) {
+                    Text("Keep the highest wheel in place and raise the highlighted wheels one at a time.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal)
+                        .padding(.top, 8)
 
-                wheelDiagram
-                    .frame(height: 240)
+                    wheelDiagram
+                        .frame(height: 240)
 
-                actionZone
-                    .frame(height: 150)
-
-                Spacer(minLength: 0)
+                    actionZone
+                        .frame(minHeight: 150, alignment: .top)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .padding()
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .scrollBounceBehavior(.basedOnSize)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Level wheel by wheel")
             .navigationBarTitleDisplayMode(.inline)
@@ -133,13 +138,16 @@ struct InflationGuideView: View {
                     if isRef { Image(systemName: "anchor").font(.caption2).foregroundStyle(.white) }
                     else if finished { Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(.white) }
                 }
-                Text(isRef ? "reference" : finished ? "done" : "\(Int(gap(c).rounded()))mm")
-                    .font(.system(size: 10, weight: .semibold))
+                Text(isRef ? "Reference" : finished ? "Complete" : "\(Int(gap(c).rounded())) mm")
+                    .font(.system(size: 10, weight: .semibold).monospacedDigit())
                     .foregroundStyle(isRef ? .secondary : tint)
             }
         }
         .buttonStyle(.plain)
         .disabled(isRef || finished)
+        .accessibilityLabel(isRef ? "\(c.label) wheel. Reference — keep in place."
+                            : finished ? "\(c.label) wheel. Complete."
+                            : "\(c.label) wheel. Raise by \(Int(gap(c).rounded())) millimetres.")
     }
 
     // MARK: - Action zone (fixed height)
@@ -147,14 +155,15 @@ struct InflationGuideView: View {
     @ViewBuilder private var actionZone: some View {
         if allLevel {
             card(icon: "checkmark.circle.fill", tint: Theme.levelGreen,
-                 title: "Level — handbrake on", message: "Every wheel's up to its mark. Nicely done.")
+                 title: "Vehicle level",
+                 message: "All wheels have reached their targets. Apply the handbrake.")
         } else if let c = selected {
             activeGauge(c)
         } else {
             let next = Corner.allCases.filter { !isDone($0) }.max(by: { gap($0) < gap($1) })
             card(icon: "hand.tap.fill", tint: Theme.needsRamp,
-                 title: "Pick a wheel",
-                 message: next.map { "Tap \($0.label) — it needs the most (\(Int(gap($0).rounded()))mm) — and \(verb.lowercased()) it." }
+                 title: next.map { "Start with \($0.label.lowercased())" } ?? "Pick a wheel",
+                 message: next.map { "Raise it by \(Int(gap($0).rounded())) mm." }
                     ?? "Tap the wheel you'll raise first.")
         }
     }
@@ -171,15 +180,27 @@ struct InflationGuideView: View {
                 .font(.system(size: 34, weight: .heavy, design: .rounded))
                 .foregroundStyle(remaining < tolMM ? Theme.levelGreen : Color(.label))
                 .contentTransition(.numericText())
-            if kind == .blocks {
-                Text("≈ \(blocks) block\(blocks == 1 ? "" : "s")").font(.subheadline).foregroundStyle(.secondary)
-            } else {
-                Text("Faster beeps as you get close — chimes when you're there.")
+            switch kind {
+            case .blocks:
+                Text("Add approximately \(blocks) block\(blocks == 1 ? "" : "s"), then check the reading.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            case .inflatable:
+                Text("Inflate slowly. The tones speed up as you approach the target.")
+                    .font(.caption).foregroundStyle(.secondary)
+            default:
+                Text("Raise slowly until the target is reached.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             ProgressView(value: progress).tint(Theme.levelGreen)
-            Button("Choose a different wheel") { selected = nil }
-                .font(.footnote)
+            // 44pt frame + contentShape INSIDE the label — outside the Button it only
+            // reserves layout space and the tap target stays text-height.
+            Button { selected = nil } label: {
+                Text("Choose another wheel")
+                    .font(.footnote)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
         }
         .frame(maxWidth: .infinity)
         .padding(14)

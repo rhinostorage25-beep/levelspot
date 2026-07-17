@@ -1,6 +1,5 @@
 import Foundation
 import CoreLocation
-import Network
 import Observation
 
 @Observable
@@ -81,20 +80,5 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // Poor GPS at a remote pitch is an expected state, not an error path.
-    }
-}
-
-/// Connectivity drives copy only ("No signal — showing your saved pitch data"), never a
-/// spinner and never a gate on the core scan.
-@Observable
-final class ConnectivityMonitor {
-    private(set) var isOnline = true
-    private let monitor = NWPathMonitor()
-
-    init() {
-        monitor.pathUpdateHandler = { [weak self] path in
-            DispatchQueue.main.async { self?.isOnline = (path.status == .satisfied) }
-        }
-        monitor.start(queue: DispatchQueue(label: "levelspot.connectivity"))
     }
 }

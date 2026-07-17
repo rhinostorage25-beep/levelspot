@@ -64,11 +64,11 @@ struct RampProfileRef: Decodable, Identifiable {
     /// One-line capacity summary for the Setup rows.
     var capacityLabel: String {
         switch rampKind {
-        case .stepped: return stepsMm.map(String.init).joined(separator: " / ") + "mm"
-        case .blocks: return "up to \(ceilingMM)mm · stackable blocks"
-        case .inflatable: return "up to \(ceilingMM)mm · inflatable"
-        case .ratchet: return "up to \(ceilingMM)mm · ratchet"
-        case .wedge: return "up to \(ceilingMM)mm · drive-on wedge"
+        case .stepped: return stepsMm.map(String.init).joined(separator: " / ") + " mm"
+        case .blocks: return "up to \(ceilingMM) mm · stackable blocks"
+        case .inflatable: return "up to \(ceilingMM) mm · inflatable"
+        case .ratchet: return "up to \(ceilingMM) mm · ratchet"
+        case .wedge: return "up to \(ceilingMM) mm · drive-on wedge"
         }
     }
 }

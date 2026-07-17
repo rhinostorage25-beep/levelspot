@@ -722,7 +722,7 @@ struct LevelScanView: View {
         // Say WHICH thing we're waiting for — a single "finding your position" hid a stuck,
         // never-calibrated compass behind the same words as a pending GPS fix. And the planner
         // literally cannot aim without knowing the awning side, so say THAT when it's the gap.
-        if config == nil { return "Measure your van first — the planner needs your awning side" }
+        if config == nil { return "Measure your vehicle first — the planner needs your awning side." }
         if location.latitude == nil { return "Finding your location…" }
         if let s = sunPosition, !s.isUp {
             // Only really reachable for "Now" at night — the timed presets roll forward

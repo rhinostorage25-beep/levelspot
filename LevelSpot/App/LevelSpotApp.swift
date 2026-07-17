@@ -15,7 +15,6 @@ struct LevelSpotApp: App {
 
     @State private var motion = MotionService()
     @State private var location = LocationService()
-    @State private var connectivity = ConnectivityMonitor()
     @State private var entitlements = EntitlementStore()
 
     var body: some Scene {
@@ -23,7 +22,6 @@ struct LevelSpotApp: App {
             RootView()
                 .environment(motion)
                 .environment(location)
-                .environment(connectivity)
                 .environment(entitlements)
         }
         .modelContainer(container)

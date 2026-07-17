@@ -13,12 +13,16 @@ struct RampShopSheet: View {
 
     private var products: [RampProfileRef] { ReferenceStore.shared.rampsReaching(mm: neededMM) }
 
+    /// The TITLE rounds to 5 mm to match the coach card's "about N mm" (no fake precision);
+    /// the product filter keeps the raw figure so nothing that falls short slips through.
+    private var displayMM: Int? { neededMM.map { (($0 + 2) / 5) * 5 } }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {
-                    if let mm = neededMM {
-                        Text("Your ramps fall short here. These reach the ~\(mm)mm you need — cheapest first.")
+                    if neededMM != nil {
+                        Text("Your current ramps do not provide enough lift for this pitch.")
                             .font(.footnote).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -27,7 +31,7 @@ struct RampShopSheet: View {
                 }
                 .padding()
             }
-            .navigationTitle(neededMM.map { "Ramps that reach \($0)mm" } ?? "Shop ramps")
+            .navigationTitle(displayMM.map { "Ramps providing at least \($0) mm of lift" } ?? "Levelling equipment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
@@ -43,7 +47,7 @@ struct RampShopSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(p.name).font(.subheadline.weight(.semibold))
                 HStack(spacing: 6) {
-                    Text("\(p.ceilingMM)mm")
+                    Text("\(p.ceilingMM) mm")
                         .font(.caption.weight(.bold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Theme.levelGreen.opacity(0.2), in: Capsule())
@@ -55,7 +59,7 @@ struct RampShopSheet: View {
             VStack(alignment: .trailing, spacing: 6) {
                 Text(p.priceLabel).font(.subheadline.weight(.bold))
                 Button { if let u = p.buyURL { openURL(u) } } label: {
-                    Text("Buy →").font(.caption.weight(.bold))
+                    Text("Buy").font(.caption.weight(.bold))
                 }
                 .buttonStyle(.borderedProminent).controlSize(.small)
                 .disabled(p.buyURL == nil)
@@ -66,9 +70,9 @@ struct RampShopSheet: View {
     }
 
     private var disclosure: some View {
-        Text("LevelSpot earns a small commission on some links. It never changes your price — or which ramps we recommend. Only whether a ramp reaches the height decides that.")
+        Text("LevelSpot may earn commission from some purchases. This does not affect the price or product order.")
             .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
     }

@@ -72,11 +72,11 @@ enum SleepHeadEnd: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .off: return "Off — dead level"
-        case .front: return "Head at the front"
-        case .rear: return "Head at the rear"
-        case .left: return "Head on the left"
-        case .right: return "Head on the right"
+        case .off: return "Off"
+        case .front: return "Head at front"
+        case .rear: return "Head at rear"
+        case .left: return "Head on left"
+        case .right: return "Head on right"
         }
     }
 
@@ -118,7 +118,7 @@ enum SettingsAction {
     case openWizard(VehicleSetupView.SetupMode, startStep: Int)
     case shop
     case paywall
-    case testWindAlert   // beta-only row — see proPreviewSection
+    case testWindAlert   // beta-only row — see DeveloperOptionsView
 }
 
 /// The gear's ONE-TAP settings screen. Everything actionable is either done right here
@@ -131,7 +131,9 @@ struct SettingsSheet: View {
     @Environment(EntitlementStore.self) private var entitlements
     @Query(sort: \VehicleConfig.updatedAt, order: .reverse) private var vehicles: [VehicleConfig]
     @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
-    @AppStorage("appLanguageCode") private var languageCode = "en"
+    // Language deliberately has NO settings row: the app is English-only today, and showing
+    // unavailable languages as selectable choices misleads. Restore a picker when at least
+    // two localisations genuinely work (the stored appLanguageCode key is still respected).
 
     let onAction: (SettingsAction) -> Void
 
@@ -139,20 +141,13 @@ struct SettingsSheet: View {
     /// the sleep and add-vehicle rows in THIS open sheet, not the next one.
     private var isPro: Bool { entitlements.isPro }
 
-    private let languages: [(code: String, name: String, flag: String)] = [
-        ("en", "English", "🇬🇧"), ("de", "Deutsch", "🇩🇪"), ("fr", "Français", "🇫🇷"),
-        ("it", "Italiano", "🇮🇹"), ("es", "Español", "🇪🇸"), ("nl", "Nederlands", "🇳🇱"),
-    ]
-
     var body: some View {
         NavigationStack {
             List {
                 vehicleSection
-                sleepSection
-                windSection
-                shopSection
-                languageSection
-                proPreviewSection
+                comfortSection
+                appSection
+                developerSection
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -169,10 +164,10 @@ struct SettingsSheet: View {
         if vehicles.isEmpty {
             Section {
                 Button { act(.openWizard(.firstRun, startStep: 1)) } label: {
-                    Label("Measure your van", systemImage: "ruler")
+                    Label("Measure your vehicle", systemImage: "ruler")
                 }
             } footer: {
-                Text("Two measurements, your awning side and your ramps — unlocks exact figures instead of ≈ estimates.")
+                Text("Two measurements unlock accurate wheel-by-wheel guidance.")
             }
         } else {
             Section("Vehicle") {
@@ -197,21 +192,21 @@ struct SettingsSheet: View {
                 Button {
                     if isPro { act(.openWizard(.addNew, startStep: 1)) } else { act(.paywall) }
                 } label: {
-                    Label(isPro ? "Add another vehicle" : "Add another vehicle — Pro",
+                    Label(isPro ? "Add vehicle" : "Add vehicle — Pro",
                           systemImage: isPro ? "plus" : "lock.fill")
                 }
             }
             if let active = vehicles.first {
                 Section("Edit \(active.displayName)") {
-                    // Deep links: straight to the RIGHT wizard step — no six-step march.
-                    settingsRow("ruler", "Size & measurements",
-                                "\(active.wheelbaseMM)mm wheelbase · \(active.trackFrontMM)mm track") {
+                    // Deep links: straight to the RIGHT wizard step — no five-step march.
+                    settingsRow("ruler", "Dimensions",
+                                "\(active.wheelbaseMM) mm wheelbase · \(active.trackFrontMM) mm front track") {
                         act(.openWizard(.editActive, startStep: 1))
                     }
                     settingsRow("beach.umbrella", "Awning side", active.livingSide.label) {
                         act(.openWizard(.editActive, startStep: 2))
                     }
-                    settingsRow("arrow.up.to.line.compact", "Ramps", rampName(active)) {
+                    settingsRow("arrow.up.to.line.compact", "Levelling equipment", rampName(active)) {
                         act(.openWizard(.editActive, startStep: 3))
                     }
                 }
@@ -237,9 +232,11 @@ struct SettingsSheet: View {
         }
     }
 
-    // MARK: Sleep (inline — two taps, not a buried sheet)
+    // MARK: Comfort (sleep tilt + wind alerts, inline — two taps, not a buried sheet)
 
-    @ViewBuilder private var sleepSection: some View {
+    @AppStorage("windAlertsOn") private var windAlertsOn = true
+
+    @ViewBuilder private var comfortSection: some View {
         Section {
             if isPro {
                 Picker(selection: $sleepHeadEndRaw) {
@@ -250,6 +247,9 @@ struct SettingsSheet: View {
                     Label("Sleep tilt", systemImage: "bed.double.fill")
                 }
                 .pickerStyle(.menu)
+                Toggle(isOn: $windAlertsOn) {
+                    Label("Wind alerts", systemImage: "wind")
+                }
             } else {
                 Button { act(.paywall) } label: {
                     HStack {
@@ -258,43 +258,6 @@ struct SettingsSheet: View {
                         Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
                     }
                 }
-            }
-        } header: {
-            Text("Comfort")
-        } footer: {
-            Text("Tilts the level target half a degree toward your pillow (~15mm over a 2m bed) — the dial, degrees and ramp coaching all aim at it. Still fridge-safe.")
-        }
-    }
-
-    // MARK: Language
-
-    private var languageSection: some View {
-        Section {
-            Picker(selection: $languageCode) {
-                ForEach(languages, id: \.code) { lang in
-                    Text("\(lang.flag)  \(lang.name)").tag(lang.code)
-                }
-            } label: {
-                Label("Language", systemImage: "globe")
-            }
-            .pickerStyle(.menu)
-        } footer: {
-            Text("The app is in English for now — the other languages are coming soon.")
-        }
-    }
-
-    // MARK: Wind alerts
-
-    @AppStorage("windAlertsOn") private var windAlertsOn = true
-
-    /// Awning wind alerts (Pro): warn before forecast gusts get awning-threatening.
-    private var windSection: some View {
-        Section {
-            if isPro {
-                Toggle(isOn: $windAlertsOn) {
-                    Label("Wind alerts", systemImage: "wind")
-                }
-            } else {
                 Button { act(.paywall) } label: {
                     HStack {
                         Label("Wind alerts — Pro", systemImage: "lock.fill").foregroundStyle(.primary)
@@ -303,56 +266,88 @@ struct SettingsSheet: View {
                     }
                 }
             }
+        } header: {
+            Text("Comfort")
         } footer: {
-            Text("Warns you — in app and by notification — when gusts forecast at your pitch could threaten the awning (25 mph+). Weather data by [Apple Weather](https://weatherkit.apple.com/legal-attribution.html).")
+            Text("Sleep tilt adds a gentle 0.5° rise toward your pillow — levelling guidance adjusts automatically. Wind alerts warn you when forecast gusts may threaten your awning.")
         }
     }
 
-    // MARK: Shop
+    // MARK: App (shop, weather attribution)
 
-    /// The shop shouldn't need hunting for — it's a permanent, honest storefront row here,
-    /// and the coaching card on the dial deep-links in with the exact height needed.
-    private var shopSection: some View {
+    /// The shop stays one honest row — the dial's coaching deep-links here with the exact
+    /// height needed. Weather attribution is displayed separately from the feature, as
+    /// Apple's WeatherKit terms require.
+    private var appSection: some View {
         Section {
             Button { act(.shop) } label: {
                 HStack {
-                    Label("Shop levelling ramps", systemImage: "cart").foregroundStyle(.primary)
+                    Label("Find levelling equipment", systemImage: "cart").foregroundStyle(.primary)
                     Spacer()
                     Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
                 }
             }
+            Link(destination: URL(string: "https://weatherkit.apple.com/legal-attribution.html")!) {
+                HStack {
+                    Label("Weather data", systemImage: "cloud.sun").foregroundStyle(.primary)
+                    Spacer()
+                    Text("Apple Weather").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("App")
         } footer: {
-            Text("Real UK ramps, cheapest first. The coaching on the dial links here with the exact height your pitch needs.")
+            Text("See products that provide the lift your vehicle needs. Weather data provided by Apple Weather.")
         }
     }
 
-    // MARK: TestFlight Pro preview
+    // MARK: Developer options (TestFlight only)
 
-    /// ⚠️ BETA-ONLY LEVER — the whole section MUST be deleted before App Store submission
-    /// (see the levelspot-pro-test-unlock memory note). Replaces the old hidden long-press on
-    /// the calibrate icon, which was undiscoverable and broke the moment the toolbar changed.
-    /// Real purchases always win over this flag (see EntitlementStore.updateEntitlement).
-    private var proPreviewSection: some View {
+    /// ⚠️ BETA-ONLY — this row and DeveloperOptionsView MUST be deleted before App Store
+    /// submission (see the levelspot-pro-test-unlock memory note). Lives behind its own
+    /// screen so beta levers never sit beside customer settings.
+    private var developerSection: some View {
         Section {
-            Toggle(isOn: Binding(
-                get: { entitlements.previewProOn },
-                set: { entitlements.setPreviewPro($0) }
-            )) {
-                Label("Pro preview", systemImage: "wand.and.stars")
+            NavigationLink {
+                DeveloperOptionsView(onTestWind: { act(.testWindAlert) })
+            } label: {
+                Label("Developer options", systemImage: "hammer")
             }
-            Button { act(.testWindAlert) } label: {
-                Label("Test wind alert", systemImage: "wind")
-            }
-        } header: {
-            Text("TestFlight testing")
-        } footer: {
-            Text("Beta-only tools, removed before App Store release. Pro preview flips every Pro feature on without a purchase. Test wind alert fakes a 38 mph warning — capsule on the dial immediately, notification about 5 seconds later (needs Pro preview + Wind alerts on).")
         }
     }
 
     private func act(_ action: SettingsAction) {
         onAction(action)
         dismiss()
+    }
+}
+
+/// ⚠️ BETA-ONLY — delete with the Developer options row before App Store submission.
+/// Pro preview flips every Pro feature on without a purchase (real purchases always win —
+/// see EntitlementStore.updateEntitlement). Test wind alert fakes a 38 mph warning: banner
+/// on the dial immediately, notification about 5 seconds later.
+struct DeveloperOptionsView: View {
+    @Environment(EntitlementStore.self) private var entitlements
+    let onTestWind: () -> Void
+
+    var body: some View {
+        List {
+            Section {
+                Toggle(isOn: Binding(
+                    get: { entitlements.previewProOn },
+                    set: { entitlements.setPreviewPro($0) }
+                )) {
+                    Label("Pro preview", systemImage: "wand.and.stars")
+                }
+                Button(action: onTestWind) {
+                    Label("Test wind alert", systemImage: "wind")
+                }
+            } footer: {
+                Text("TestFlight-only tools, removed before App Store release. Pro preview unlocks every Pro feature without a purchase. Test wind alert fakes a 38 mph warning — banner on the dial immediately, notification about 5 seconds later (needs Pro preview and Wind alerts on).")
+            }
+        }
+        .navigationTitle("Developer options")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -372,14 +367,14 @@ struct SavePitchData: Identifiable {
 }
 
 enum PitchRecipe {
-    /// "Front Left ~70mm · Rear Left ~40mm", or the honest zero-case.
+    /// "Front left: about 70 mm · Rear left: about 40 mm", or the honest zero-case.
     static func summary(fl: Double, fr: Double, rl: Double, rr: Double) -> String {
         let corners: [(String, Double)] = [
-            ("Front Left", fl), ("Front Right", fr), ("Rear Left", rl), ("Rear Right", rr),
+            ("Front left", fl), ("Front right", fr), ("Rear left", rl), ("Rear right", rr),
         ]
         let ramped = corners.filter { $0.1 >= 10 }
-        guard !ramped.isEmpty else { return "Dead level — no ramps needed." }
-        return ramped.map { "\($0.0) ~\(Int($0.1.rounded()))mm" }.joined(separator: " · ")
+        guard !ramped.isEmpty else { return "No ramps were needed." }
+        return ramped.map { "\($0.0): about \(Int($0.1.rounded())) mm" }.joined(separator: " · ")
     }
 
     static func summary(_ pitch: PitchRecord) -> String {
@@ -400,7 +395,7 @@ struct SavePitchSheet: View {
                 Image(systemName: "mappin.and.ellipse")
                     .font(.system(size: 40)).foregroundStyle(Color.accentColor)
                 Text("Save this pitch?").font(.title2.weight(.bold))
-                Text("Next time you're back, LevelSpot recalls exactly what it took to get level here.")
+                Text("LevelSpot can recall this setup when you return.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
                 Label(PitchRecipe.summary(fl: data.fl, fr: data.fr, rl: data.rl, rr: data.rr),
@@ -410,7 +405,7 @@ struct SavePitchSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
 
-                TextField("Name it — e.g. Lakeside pitch 14", text: $name)
+                TextField("Pitch name", text: $name, prompt: Text("Lakeside pitch 14"))
                     .textFieldStyle(.roundedBorder)
 
                 Button {
@@ -441,6 +436,7 @@ struct SavePitchSheet: View {
 struct PitchDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @State private var showDeleteConfirm = false
     let pitch: PitchRecord
 
     var body: some View {
@@ -456,11 +452,11 @@ struct PitchDetailSheet: View {
                     .font(.system(size: 44)).foregroundStyle(Color.accentColor)
                 Text(pitch.siteName.isEmpty ? "Saved pitch" : pitch.siteName)
                     .font(.title2.weight(.bold)).multilineTextAlignment(.center)
-                Text("Levelled here \(pitch.visitedAt.formatted(date: .abbreviated, time: .omitted))")
+                Text("Last levelled \(pitch.visitedAt.formatted(date: .long, time: .omitted))")
                     .font(.subheadline).foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("What it took last time").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("Previous setup").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                     Label(PitchRecipe.summary(pitch), systemImage: "arrow.up.circle")
                         .font(.subheadline.weight(.semibold))
                 }
@@ -468,16 +464,25 @@ struct PitchDetailSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
 
-                Text("Park roughly where you did before and set up the same way — you should land level (or very close) first try.")
-                    .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+                // No promise of landing level — loading, tyre pressures, exact position
+                // and ground conditions all change between visits.
+                Text("Park in roughly the same position, then check the live reading.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
                 Button(role: .destructive) {
-                    modelContext.delete(pitch)
-                    dismiss()
+                    showDeleteConfirm = true
                 } label: {
-                    Label("Delete this pitch", systemImage: "trash").frame(maxWidth: .infinity)
+                    Label("Delete pitch", systemImage: "trash").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered).controlSize(.large)
+                .confirmationDialog("Delete this pitch?", isPresented: $showDeleteConfirm,
+                                    titleVisibility: .visible) {
+                    Button("Delete pitch", role: .destructive) {
+                        modelContext.delete(pitch)
+                        dismiss()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
             }
             .padding(24)
         }

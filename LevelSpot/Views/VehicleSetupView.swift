@@ -48,9 +48,9 @@ struct VehicleSetupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Edits are single-page (deep-linked from Settings) — dots only make sense
+            // Edits are single-page (deep-linked from Settings) — progress only makes sense
             // when there's an actual journey.
-            if mode != .editActive { progressDots }
+            if mode != .editActive { SetupProgress(step: step, total: lastStep).padding(.top, 10) }
             Group {
                 switch step {
                 case 1: measureStep
@@ -66,7 +66,7 @@ struct VehicleSetupView: View {
             navBar
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("Set up")
+        .navigationTitle(mode == .editActive ? "Edit vehicle" : "Add vehicle")
         .navigationBarTitleDisplayMode(.inline)
         .animation(.snappy, value: step)
         .sheet(isPresented: $showShop) { RampShopSheet(neededMM: nil) }
@@ -76,17 +76,6 @@ struct VehicleSetupView: View {
         // onAppear fires AGAIN when the AR-measure fullScreenCover dismisses — prefill must run
         // once, or it wipes the value the camera just measured (didPrefill guards it).
         .onAppear { motion.start(); prefillFromExisting() }
-    }
-
-    private var progressDots: some View {
-        HStack(spacing: 8) {
-            ForEach(firstStep...lastStep, id: \.self) { i in
-                Capsule()
-                    .fill(i == step ? Color.accentColor : Color(.tertiaryLabel))
-                    .frame(width: i == step ? 22 : 8, height: 8)
-            }
-        }
-        .padding(.top, 10)
     }
 
     private func stepHeader(_ title: String, _ subtitle: String) -> some View {
@@ -104,16 +93,12 @@ struct VehicleSetupView: View {
     private var measureStep: some View {
         ScrollView {
             VStack(spacing: 18) {
-                stepHeader("Measure your van", "No make or model needed — just two measurements, so LevelSpot works for any vehicle, anywhere.")
+                stepHeader("Add your vehicle", "Add two measurements for accurate wheel-by-wheel guidance.")
                 VStack(alignment: .leading, spacing: 8) {
                     LabeledContent("Vehicle name") {
-                        TextField(mode == .addNew ? "e.g. The caravan" : "My van", text: $vehicleName)
+                        TextField("My motorhome", text: $vehicleName)
                             .multilineTextAlignment(.trailing)
                     }
-                    Text(mode == .addNew
-                         ? "Give it a name you'll recognise in the vehicle switcher."
-                         : "Shown in the vehicle switcher if you add more vehicles (Pro).")
-                        .font(.caption2).foregroundStyle(.secondary)
                 }
                 .padding()
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
@@ -121,18 +106,18 @@ struct VehicleSetupView: View {
                 measureField(diagram: AnyView(VanPhoto("VanSide", fallback: AnyView(WheelbaseDiagram()))),
                              label: "Wheelbase (mm)", placeholder: "e.g. 3400",
                              text: $wheelbase, target: .wheelbase,
-                             hint: "Centre of the front tyre to centre of the rear tyre.")
+                             hint: "Measure between the centres of the front and rear wheels.")
                 measureField(diagram: AnyView(VanPhoto("VanFront", fallback: AnyView(TrackDiagram()))),
-                             label: "Track width (mm)", placeholder: "e.g. 1800",
+                             label: "Front track width (mm)", placeholder: "e.g. 1800",
                              text: $trackFront, target: .trackFront,
-                             hint: "Centre to centre of the two FRONT tyres, across the van.")
-                Toggle("Rear track is different", isOn: $rearDiffers.animation())
+                             hint: "Measure between the centres of the front wheels.")
+                Toggle("Use a different rear track width", isOn: $rearDiffers.animation())
                     .padding(.horizontal)
                 if rearDiffers {
                     measureField(diagram: AnyView(VanPhoto("VanFront", fallback: AnyView(TrackDiagram()))),
-                                 label: "Rear track (mm)", placeholder: "e.g. 1980",
+                                 label: "Rear track width (mm)", placeholder: "e.g. 1980",
                                  text: $trackRear, target: .trackRear,
-                                 hint: "Centre to centre of the two REAR tyres — wider on some chassis.")
+                                 hint: "Measure between the centres of the rear wheels.")
                 }
             }
             .padding(.vertical)
@@ -161,7 +146,7 @@ struct VehicleSetupView: View {
 
     private var sitSideStep: some View {
         VStack(spacing: 16) {
-            stepHeader("Which side do you sit out on?", "Pick your awning side — the sun & shade planner uses it to face the van the right way.")
+            stepHeader("Which side is your awning on?", "Choose the side where the awning opens.")
             // Buttons at the top; the diagram below just shows the awning opening on that side.
             Picker("Side", selection: sideBinding) {
                 ForEach(LivingSide.allCases, id: \.self) { Text($0.label).tag(Optional($0)) }
@@ -169,6 +154,10 @@ struct VehicleSetupView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .padding(.horizontal)
+            // Without this, a meaningful share of users pick the mirror image.
+            Text("Left and right are viewed from inside the vehicle, facing forward.")
+                .font(.caption).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).padding(.horizontal)
             AwningVan(selection: livingSide)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal)
@@ -182,7 +171,7 @@ struct VehicleSetupView: View {
     private var rampsStep: some View {
         ScrollView {
             VStack(spacing: 12) {
-                stepHeader("Your levelling ramps", "Pick what you've got — it decides the ramp coaching. Or shop a set that fits.")
+                stepHeader("Choose your levelling equipment", "Guidance will match the lift your equipment provides.")
                 ForEach(ref.rampProfiles) { profile in rampCard(profile) }
                 rampCardCustom
                 if rampProfileId == "custom" {
@@ -195,7 +184,7 @@ struct VehicleSetupView: View {
                     .padding(.horizontal)
                 }
                 Button { showShop = true } label: {
-                    Label("Shop levelling ramps", systemImage: "cart").frame(maxWidth: .infinity)
+                    Label("Find levelling equipment", systemImage: "cart").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered).controlSize(.large).padding(.horizontal).padding(.top, 4)
             }
@@ -242,28 +231,20 @@ struct VehicleSetupView: View {
     private var sunStep: some View {
         ScrollView {
             VStack(spacing: 22) {
-                stepHeader("Sun & shade planner", "A Pro extra — don't miss it.")
-                HStack(spacing: 28) {
-                    VStack(spacing: 8) {
-                        Image(systemName: "sun.max.fill").font(.system(size: 46)).foregroundStyle(Theme.sun)
-                        Text("Chase the sun").font(.subheadline.weight(.semibold))
-                    }
-                    VStack(spacing: 8) {
-                        Image(systemName: "cloud.sun.fill").font(.system(size: 46)).foregroundStyle(.secondary)
-                        Text("Find the shade").font(.subheadline.weight(.semibold))
-                    }
-                }
-                .padding(.vertical, 8)
+                stepHeader("Plan for sun or shade", "LevelSpot shows which way to face the vehicle for morning, midday or evening.")
+                Image(systemName: "sun.max.fill")
+                    .font(.system(size: 46)).foregroundStyle(Theme.sun)
+                    .padding(.vertical, 8)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 12) {
-                    sunPoint("location.north.line.fill", "It reads the sun's position and your compass, then shows which way to face the van.")
-                    sunPoint("arrow.triangle.2.circlepath", "Turn the van until the ☀ locks green at the top — that's the awning-perfect direction.")
-                    sunPoint("sunrise.fill", "Set it to chase the evening sun, or find shade under the awning on a hot day.")
+                    sunPoint("location.north.line.fill", "It reads the sun's position and your compass, then shows which way to face the vehicle.")
+                    sunPoint("arrow.triangle.2.circlepath", "Turn the vehicle until the sun marker locks green at the top.")
                 }
                 .padding()
                 .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
                 .padding(.horizontal)
-                Text("Toggle it any time from the ☀ button on the Level screen.")
-                    .font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center).padding(.horizontal)
+                Text("You can change this any time from the sun button.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
             }
             .padding(.vertical)
         }
@@ -281,42 +262,66 @@ struct VehicleSetupView: View {
     private var calibrateStep: some View {
         ScrollView {
             VStack(spacing: 20) {
-                stepHeader("Calibrate — one time", "Zero the phone so the level is spot-on. You only do this once.")
+                stepHeader("Calibrate your phone", "You normally only need to do this once.")
                 PhoneFlatDiagram().frame(height: 150).accessibilityHidden(true)
-                Text("Lay the phone exactly where it'll sit while you level — flat, screen up, top toward the front — on ground you KNOW is level. Then tap below.")
+                Text("Place the phone screen-up on known level ground, with its top pointing toward the front of the vehicle.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
                 if calibrating {
                     VStack(spacing: 6) {
-                        Text("Keep it flat — hands off").font(.headline)
+                        Text("Keep the phone still").font(.headline)
                         Text("\(calibCountdown)")
-                            .font(.system(size: 54, weight: .heavy, design: .rounded))
+                            .font(.system(size: 54, weight: .heavy, design: .rounded).monospacedDigit())
                             .foregroundStyle(Color.accentColor)
                             .contentTransition(.numericText())
                     }
                     .frame(height: 120)
                 } else {
                     VStack(spacing: 4) {
-                        Text(String(format: "%.1f°", calibDegOff))
-                            .font(.system(size: 40, weight: .heavy, design: .rounded))
+                        Text(String(format: "Current tilt: %.1f°", calibDegOff))
+                            .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
                             .foregroundStyle(calibDegOff > 8 ? Theme.needsBigRamp : Color(.label))
                             .contentTransition(.numericText())
-                        Text("reading right now").font(.caption).foregroundStyle(.secondary)
+                        // A stale calibration can make level ground READ tilted — when one is
+                        // stored, the caption must offer the actual cure, not just "move".
+                        Text(calibDegOff > 8
+                             ? (motion.isCalibrated
+                                ? "Move the phone to level ground — or reset the calibration if this surface is level."
+                                : "Move the phone to level ground before calibrating.")
+                             : "Surface appears level.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    // Disabled while clearly invalid: a 28° "calibration" would bake the
+                    // tilt into every future reading.
                     Button { startCalibration() } label: {
-                        Label(motion.isCalibrated ? "Re-calibrate" : "Calibrate now", systemImage: "scope")
+                        Label("Calibrate here", systemImage: "scope")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent).controlSize(.large).padding(.horizontal)
+                    .disabled(calibDegOff > 8)
+                    .accessibilityHint(calibDegOff > 8 ? "Disabled until the phone is on level ground." : "")
                     if calibJustSaved {
-                        Label("Calibrated & saved ✓", systemImage: "checkmark.seal.fill")
+                        Label("Calibration complete", systemImage: "checkmark.seal.fill")
                             .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.levelGreen)
                     } else if motion.isCalibrated {
-                        Label("Already calibrated (saved)", systemImage: "checkmark.seal")
+                        Label("Already calibrated", systemImage: "checkmark.seal")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
+                    if motion.isCalibrated {
+                        // The escape hatch for a bad stored calibration (which the disable
+                        // above would otherwise wrongly lock in).
+                        Button(role: .destructive) { motion.resetCalibration() } label: {
+                            Text("Reset calibration")
+                                .font(.footnote)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 }
-                Text("Lay it flat, tap Calibrate, then keep still for the count — it saves automatically. You can also skip and do it later from the dial.")
-                    .font(.caption2).foregroundStyle(.tertiary).multilineTextAlignment(.center).padding(.horizontal)
+                Text("It saves automatically after the countdown. You can also do this later from the dial.")
+                    .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
             }
             .padding(.vertical)
         }
@@ -359,7 +364,7 @@ struct VehicleSetupView: View {
                 if step > firstStep {
                     Button("Back") { step -= 1 }.buttonStyle(.bordered)
                 }
-                Button(step == lastStep ? "Finish" : "Next") {
+                Button(step == lastStep ? "Finish setup" : "Continue") {
                     if step == lastStep { finish() } else { step += 1 }
                 }
                 .buttonStyle(.borderedProminent)
@@ -411,7 +416,7 @@ struct VehicleSetupView: View {
         guard let wb = Int(wheelbase), let front = Int(trackFront) else { return nil }
         let rear = rearDiffers ? (Int(trackRear) ?? front) : front
         let trimmedName = vehicleName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallbackName = mode == .addNew ? "Vehicle \(existingConfigs.count + 1)" : "My van"
+        let fallbackName = mode == .addNew ? "Vehicle \(existingConfigs.count + 1)" : "My vehicle"
         return VehicleConfig(presetId: nil, genId: nil,
                              displayName: trimmedName.isEmpty ? fallbackName : trimmedName,
                              wheelbaseMM: wb, trackFrontMM: front, trackRearMM: rear,

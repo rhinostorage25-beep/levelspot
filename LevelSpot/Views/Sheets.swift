@@ -22,23 +22,23 @@ struct PaywallSheet: View {
                     .accessibilityHidden(true)
 
                 Text("LevelSpot Pro").font(.title2.weight(.bold))
-                Text("The Perfect Pitch pack — sun, memory, sleep and your whole fleet.")
+                Text("Plan the pitch before you park.")
                     .font(.subheadline).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
                 VStack(alignment: .leading, spacing: 16) {
-                    benefit("sun.max.fill", "Sun & shade, all day",
-                            "Morning sun, midday shade or evening sun — see the sun's whole path round the dial and park right first time.")
-                    benefit("wind", "Awning wind alerts",
-                            "A warning before awning-threatening gusts hit your pitch — on screen and as a notification.")
-                    benefit("mappin.and.ellipse", "Pitch memory",
-                            "Save a pitch and get the exact levelling recipe back the next time you return.")
-                    benefit("bed.double.fill", "Sleep setup",
-                            "A touch of head-up tilt built into the level target. Still fridge-safe.")
-                    benefit("car.2.fill", "All your vehicles",
-                            "Van, caravan, trailer — separate setups, one tap to switch.")
-                    benefit("scope", "Guided air-ramp levelling",
-                            "Step-by-step wheel-by-wheel targets for air bags, blocks & ratchet levellers.")
+                    benefit("sun.max.fill", "Position the awning for sun or shade",
+                            "See which way to face the vehicle for morning, midday or evening.")
+                    benefit("wind", "Get warnings for strong gusts",
+                            "On screen and by notification, before they reach your pitch.")
+                    benefit("mappin.and.ellipse", "Remember previous pitches",
+                            "Recall the exact setup when you return.")
+                    benefit("bed.double.fill", "Add a comfortable sleep tilt",
+                            "A gentle rise toward your pillow, built into the level target.")
+                    benefit("car.2.fill", "Save multiple vehicles",
+                            "Separate setups, one tap to switch.")
+                    benefit("scope", "Follow wheel-by-wheel guidance",
+                            "Targets for air bags, blocks and ratchet levellers.")
                 }
                 .padding(.horizontal, 4)
 
@@ -62,8 +62,8 @@ struct PaywallSheet: View {
                 .controlSize(.large)
                 .disabled(entitlements.purchaseInFlight)
 
-                Text("One-time purchase — yours for good. No subscription.")
-                    .font(.caption2).foregroundStyle(.tertiary)
+                Text("One-time purchase. No subscription.")
+                    .font(.caption2).foregroundStyle(.secondary)
 
                 Button("Restore purchases") {
                     Task {

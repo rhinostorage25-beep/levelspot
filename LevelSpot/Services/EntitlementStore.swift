@@ -22,13 +22,13 @@ final class EntitlementStore {
 
     /// ⚠️ TESTFLIGHT PREVIEW LEVER — works in Release (not `#if DEBUG`), because Windows-only
     /// dev means TestFlight is the only way to see a device build; there's no local Xcode run
-    /// to reach the DEBUG sim toggle. Toggled from the explicit "Pro preview" switch at the
-    /// bottom of Settings (SettingsSheet.proPreviewSection — the earlier hidden long-press on
+    /// to reach the DEBUG sim toggle. Toggled from the explicit "Pro preview" switch in
+    /// Settings → Developer options (DeveloperOptionsView — the earlier hidden long-press on
     /// the calibrate icon proved undiscoverable and fragile). Persisted so it survives relaunch.
     /// Real purchases/restores always win over this.
-    /// **MUST be removed before App Store submission — delete SettingsSheet.proPreviewSection
-    /// AND the `|| previewProOn` in updateEntitlement(), or Pro ships free and review sees a
-    /// free-Pro switch. This is a required submission step (see levelspot-pro-test-unlock).**
+    /// **MUST be removed before App Store submission — delete DeveloperOptionsView + its
+    /// Settings row AND the `|| previewProOn` in updateEntitlement(), or Pro ships free and
+    /// review sees a free-Pro switch. Required submission step (see levelspot-pro-test-unlock).**
     private static let previewKey = "proPreviewOverride"
     private(set) var previewProOn = UserDefaults.standard.bool(forKey: EntitlementStore.previewKey)
 
