@@ -178,14 +178,111 @@ struct VanPhoto: View {
 /// Zeroing the phone/mount tilt — its own focused screen (not a toolbar alert). Essential on modern
 /// phones: the camera bump means a phone laid face-up on genuinely flat ground still reads a couple
 /// of degrees until it's calibrated here.
-struct CalibrateView: View {
+/// THE calibration flow — one component, embedded by both the dial's Calibrate sheet and
+/// the wizard's final step, so the two can never drift apart again (§11). Countdown capture
+/// (tap, hands off, 3…2…1, auto-save), disabled while the surface is clearly not level,
+/// reset escape for stale calibrations, reason always adjacent to the button.
+struct CalibrationPanel: View {
     @Environment(MotionService.self) private var motion
-    @Environment(\.dismiss) private var dismiss
+
+    @State private var calibrating = false
+    @State private var countdown = 3
+    @State private var justSaved = false
+    @State private var calibrationTask: Task<Void, Never>?
     // Value-critical text scales with Dynamic Type like every other reading in the app.
-    @ScaledMetric(relativeTo: .largeTitle) private var tiltValueSize: CGFloat = 32
+    @ScaledMetric(relativeTo: .largeTitle) private var tiltValueSize: CGFloat = 30
 
     private var degOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
     private var looksOff: Bool { degOff > 8 }
+
+    var body: some View {
+        VStack(spacing: DS.content) {
+            if calibrating {
+                VStack(spacing: DS.related) {
+                    Text("Keep the phone still").font(.headline)
+                    Text("\(countdown)")
+                        .font(.system(size: 54, weight: .heavy, design: .rounded).monospacedDigit())
+                        .foregroundStyle(Color.accentColor)
+                        .contentTransition(.numericText())
+                }
+                .frame(minHeight: 120)
+            } else {
+                VStack(spacing: DS.micro) {
+                    Text(String(format: "Current tilt: %.1f°", degOff))
+                        .font(.system(size: tiltValueSize, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(looksOff ? Theme.needsBigRamp : Color(.label))
+                        .contentTransition(.numericText())
+                    // A stale calibration can make level ground READ tilted — when one is
+                    // stored, the caption offers the actual cure, not just "move".
+                    Text(looksOff
+                         ? (motion.isCalibrated
+                            ? "Move the phone to level ground — or reset the calibration if this surface is level."
+                            : "Move the phone to level ground before calibrating.")
+                         : "Surface appears level.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                // Disabled while clearly invalid: a 28° "calibration" would bake the tilt
+                // into every future reading.
+                Button { startCalibration() } label: {
+                    Label("Calibrate here", systemImage: "scope")
+                        .font(.headline).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+                .disabled(looksOff)
+                .accessibilityHint(looksOff ? "Disabled until the phone is on level ground." : "")
+                if justSaved {
+                    Label("Calibration complete", systemImage: "checkmark.seal.fill")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.levelGreen)
+                } else if motion.isCalibrated {
+                    Label("Already calibrated", systemImage: "checkmark.seal")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                if motion.isCalibrated {
+                    // The escape hatch for a bad stored calibration (which the disable
+                    // above would otherwise wrongly lock in).
+                    Button(role: .destructive) { motion.resetCalibration() } label: {
+                        Text("Reset calibration")
+                            .font(.footnote)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+        }
+        // Frozen readings would bake a wrong offset in — make sure the sensor is live.
+        .onAppear { motion.start() }
+        // Leaving the screen mid-countdown must ABORT the capture: three seconds later the
+        // phone is in the user's hand, and committing that tilt as "zero" poisons every
+        // future reading until they find Reset.
+        .onDisappear { calibrationTask?.cancel() }
+    }
+
+    /// Countdown capture: tap, take your hand away, zero once settled — not at the tap.
+    /// The explicit isCancelled checks are load-bearing: `try?` swallows CancellationError,
+    /// so without them a cancelled countdown would race to the end and calibrate anyway.
+    private func startCalibration() {
+        calibrationTask?.cancel()
+        calibrationTask = Task { @MainActor in
+            justSaved = false
+            calibrating = true
+            defer { calibrating = false }
+            for i in stride(from: 3, through: 1, by: -1) {
+                countdown = i
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+            }
+            motion.calibrateHere()
+            Haptics.saved()
+            justSaved = true
+        }
+    }
+}
+
+struct CalibrateView: View {
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -207,64 +304,14 @@ struct CalibrateView: View {
                     }
                     .padding(.horizontal)
 
-                    VStack(spacing: 4) {
-                        Text(String(format: "Current tilt: %.1f°", degOff))
-                            .font(.system(size: tiltValueSize, weight: .bold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(looksOff ? Theme.needsBigRamp : Color(.label))
-                            .contentTransition(.numericText())
-                        if !looksOff {
-                            Text("Surface appears level.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if !looksOff, motion.isCalibrated {
-                        Label("Already calibrated", systemImage: "checkmark.seal.fill")
-                            .font(.footnote).foregroundStyle(Theme.levelGreen)
-                    }
+                    CalibrationPanel()
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
             }
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 8) {
-                    // The reason lives NEXT TO the disabled button — at accessibility type
-                    // sizes the scroll content is several screens tall, and a dimmed primary
-                    // button with its explanation below the fold explains nothing.
-                    if looksOff {
-                        Text(motion.isCalibrated
-                             ? "Move the phone to level ground — or reset the calibration if this surface is level."
-                             : "Move the phone to level ground before calibrating.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    // Disabled while clearly invalid: saving a 28° "calibration" would bake
-                    // the tilt into every future reading.
-                    Button {
-                        motion.calibrateHere(); Haptics.saved(); dismiss()
-                    } label: {
-                        Label("Calibrate here", systemImage: "scope").font(.headline).frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent).controlSize(.large)
-                    .disabled(looksOff)
-                    .accessibilityHint(looksOff ? "Disabled until the phone is on level ground." : "")
-                    if motion.isCalibrated {
-                        Button(role: .destructive) { motion.resetCalibration() } label: {
-                            Text("Reset calibration")
-                                .font(.footnote)
-                                .frame(minHeight: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                }
-                .padding().background(.bar)
-            }
             .navigationTitle("Calibrate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .onAppear { motion.start() }
         }
     }
 }

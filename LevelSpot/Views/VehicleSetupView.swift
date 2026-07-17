@@ -37,9 +37,6 @@ struct VehicleSetupView: View {
     @State private var livingSide: LivingSide?
     @State private var showShop = false
     @State private var activeMeasure: MeasureTarget?
-    @State private var calibrating = false
-    @State private var calibCountdown = 3
-    @State private var calibJustSaved = false
     @State private var didPrefill = false
 
     private let lastStep = 5
@@ -278,86 +275,14 @@ struct VehicleSetupView: View {
                 PhoneFlatDiagram().frame(height: 150).accessibilityHidden(true)
                 Text("Place the phone screen-up on known level ground, with its top pointing toward the front of the vehicle.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
-                if calibrating {
-                    VStack(spacing: 6) {
-                        Text("Keep the phone still").font(.headline)
-                        Text("\(calibCountdown)")
-                            .font(.system(size: 54, weight: .heavy, design: .rounded).monospacedDigit())
-                            .foregroundStyle(Color.accentColor)
-                            .contentTransition(.numericText())
-                    }
-                    .frame(height: 120)
-                } else {
-                    VStack(spacing: 4) {
-                        Text(String(format: "Current tilt: %.1f°", calibDegOff))
-                            .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(calibDegOff > 8 ? Theme.needsBigRamp : Color(.label))
-                            .contentTransition(.numericText())
-                        // A stale calibration can make level ground READ tilted — when one is
-                        // stored, the caption must offer the actual cure, not just "move".
-                        Text(calibDegOff > 8
-                             ? (motion.isCalibrated
-                                ? "Move the phone to level ground — or reset the calibration if this surface is level."
-                                : "Move the phone to level ground before calibrating.")
-                             : "Surface appears level.")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    // Disabled while clearly invalid: a 28° "calibration" would bake the
-                    // tilt into every future reading.
-                    Button { startCalibration() } label: {
-                        Label("Calibrate here", systemImage: "scope")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent).controlSize(.large).padding(.horizontal)
-                    .disabled(calibDegOff > 8)
-                    .accessibilityHint(calibDegOff > 8 ? "Disabled until the phone is on level ground." : "")
-                    if calibJustSaved {
-                        Label("Calibration complete", systemImage: "checkmark.seal.fill")
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.levelGreen)
-                    } else if motion.isCalibrated {
-                        Label("Already calibrated", systemImage: "checkmark.seal")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    if motion.isCalibrated {
-                        // The escape hatch for a bad stored calibration (which the disable
-                        // above would otherwise wrongly lock in).
-                        Button(role: .destructive) { motion.resetCalibration() } label: {
-                            Text("Reset calibration")
-                                .font(.footnote)
-                                .frame(minHeight: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                }
+                // ONE calibration implementation, shared with the dial's Calibrate sheet —
+                // the two surfaces can't drift apart again.
+                CalibrationPanel()
+                    .padding(.horizontal)
                 Text("It saves automatically after the countdown. You can also do this later from the dial.")
                     .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
             }
             .padding(.vertical)
-        }
-        // Belt-and-braces: if anything upstream stopped device motion, restart it here — a
-        // Re-calibrate against frozen readings would bake a wrong offset into UserDefaults.
-        .onAppear { motion.start() }
-    }
-
-    private var calibDegOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
-
-    /// Countdown calibration: you lay the phone flat and tap, then leave it — we zero the reading
-    /// once it's settled (hands off), not at the tap. Persists to UserDefaults automatically.
-    private func startCalibration() {
-        Task { @MainActor in
-            calibJustSaved = false
-            calibrating = true
-            for i in stride(from: 3, through: 1, by: -1) {
-                calibCountdown = i
-                try? await Task.sleep(for: .seconds(1))
-            }
-            motion.calibrateHere()
-            Haptics.saved()
-            calibrating = false
-            calibJustSaved = true
         }
     }
 

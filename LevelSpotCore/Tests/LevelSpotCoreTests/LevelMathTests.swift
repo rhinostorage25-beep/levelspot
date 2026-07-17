@@ -110,6 +110,17 @@ final class LevelMathTests: XCTestCase {
         XCTAssertEqual(advice.wheel?.stepMM, 112)
     }
 
+    // V11: a recommendation must STRICTLY improve the error. At exactly half the smallest
+    // step (20mm vs steps [40,70,100]) the 40 leaves you 20mm off the other way — no gain,
+    // so the honest answer is nil. One millimetre past half (21mm) the step genuinely helps.
+    // (Added 16 Jul 2026 with the improvement guard in nearestStep; the Kotlin port must
+    // reproduce this vector like all the others.)
+    func testV11NoRecommendationWithoutImprovement() {
+        let steps = [40, 70, 100]
+        XCTAssertNil(RampAdvisor.nearestStep(deficitMM: 20.0, stepsMM: steps, tolerance: .comfort))
+        XCTAssertEqual(RampAdvisor.nearestStep(deficitMM: 21.0, stepsMM: steps, tolerance: .comfort), 40)
+    }
+
     // P1: multi-ramp plan — pure roll ramps BOTH wheels on the low (right) side by the same step.
     func testP1PureRollRampsBothLowSideWheels() {
         let plan = RampAdvisor.plan(rollDeg: 2.86, pitchDeg: 0, trackFrontMM: 1790, trackRearMM: 1790,

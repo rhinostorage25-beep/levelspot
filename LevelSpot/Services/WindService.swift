@@ -26,6 +26,10 @@ final class WindService {
     /// The current warning, or nil when the forecast is calm / unknown. UI shows nothing for nil.
     private(set) var warning: WindWarning?
 
+    /// When the forecast last ACTUALLY refreshed (§22 data trust: a warning shown hours after
+    /// its fetch should say so). nil until the first successful fetch.
+    private(set) var fetchedAt: Date?
+
     /// The warning the user was last actually NOTIFIED about — forecast wobble (a peak that
     /// re-rounds from 27 to 26 mph, or shifts an hour) must not ping them twice for one blow.
     private var lastNotified: WindWarning?
@@ -51,6 +55,7 @@ final class WindService {
             let window = hourly.forecast.filter {
                 $0.date > now.addingTimeInterval(-3600) && $0.date < now.addingTimeInterval(24 * 3600)
             }
+            fetchedAt = Date()
             let peak = window.max { gustMPH($0) < gustMPH($1) }
             if let peak, gustMPH(peak) >= Self.warnMPH {
                 let newWarning = WindWarning(peakMPH: Int(gustMPH(peak).rounded()), at: peak.date)

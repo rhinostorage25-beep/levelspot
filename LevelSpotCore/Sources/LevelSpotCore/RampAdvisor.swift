@@ -155,10 +155,14 @@ public enum RampAdvisor {
     /// Snap a deficit to the nearest real step a physical ramp offers — never an arbitrary
     /// figure nothing can deliver. Returns nil ("level enough") when the deficit is under
     /// half the smallest step scaled by tolerance: below that, no ramp can improve things.
+    /// A recommendation must also STRICTLY improve the error — a step that leaves the
+    /// vehicle exactly as far off (the other way) is noise dressed up as advice.
     public static func nearestStep(deficitMM: Double, stepsMM: [Int], tolerance: Tolerance) -> Int? {
         guard let smallest = stepsMM.first else { return nil }
         if deficitMM < Double(smallest) / 2 * tolerance.multiplier { return nil }
-        return stepsMM.min(by: { abs(deficitMM - Double($0)) < abs(deficitMM - Double($1)) })
+        guard let best = stepsMM.min(by: { abs(deficitMM - Double($0)) < abs(deficitMM - Double($1)) }),
+              abs(deficitMM - Double(best)) < deficitMM else { return nil }
+        return best
     }
 
     /// True when the deficit runs so far past the biggest available step that snapping to it

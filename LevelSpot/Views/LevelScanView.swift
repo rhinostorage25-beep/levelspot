@@ -28,6 +28,9 @@ struct LevelScanView: View {
     @State private var wind = WindService()    // awning wind alerts (Pro) — silent unless gusty
     @AppStorage("windAlertsOn") private var windAlertsOn = true
     @State private var sunMoment: SunMoment?   // sun planner is opt-in via the ☀ button; nil = off
+    // Persisted mirror of sunMoment, shared with the Settings "Sun and shade" row. The Level
+    // screen restores from it at appear and keeps both directions in sync via onChange.
+    @AppStorage("sunMomentRaw") private var sunMomentRaw = ""
     @State private var showSunOptions = false
     @State private var sunArcAzimuths: [Double] = []   // today's hourly sun azimuths (sun-up only)
     @State private var armed = false
@@ -132,6 +135,14 @@ struct LevelScanView: View {
     }
     private var sunAligned: Bool { sunRel.map { abs($0) < 10 } ?? false }
 
+    /// §22 data trust: a warning based on an ageing forecast says so. Fresh (<10 min)
+    /// stays clean — the suffix only appears when it adds information.
+    private var windFreshnessSuffix: String {
+        guard let fetched = wind.fetchedAt else { return "" }
+        let minutes = Int(Date().timeIntervalSince(fetched) / 60)
+        return minutes >= 10 ? " Forecast from \(minutes) min ago." : ""
+    }
+
     /// Kick a wind check when it could matter (Pro + alerts on + a fix). WindService
     /// self-throttles (30 min / 5 km), so calling this from several triggers is fine.
     private func refreshWind() {
@@ -193,6 +204,10 @@ struct LevelScanView: View {
             motion.start()
             audio.start()                                  // audio is free now
             if isPro { location.requestAndStart() }         // sun planner + pitch memory are Pro-only
+            // Restore the persisted sun mode (set here previously, or from Settings).
+            if isPro, sunMoment == nil, let restored = SunMoment(rawValue: sunMomentRaw) {
+                sunMoment = restored
+            }
             recomputeSunArc()
             refreshWind()
         }
@@ -241,6 +256,14 @@ struct LevelScanView: View {
             recomputeSunArc()
             // Compass only while the planner's on (see LocationService.startHeading).
             if moment != nil { location.requestAndStart(); location.startHeading() } else { location.stopHeading() }
+            // Keep the persisted mirror (and the Settings row) in step. Same-value writes
+            // don't re-fire onChange, so the two-way sync can't loop.
+            sunMomentRaw = moment?.rawValue ?? ""
+        }
+        // The Settings "Sun and shade" row writes the same key — follow it live.
+        .onChange(of: sunMomentRaw) { _, raw in
+            let restored = SunMoment(rawValue: raw)
+            if restored != sunMoment { sunMoment = restored }
         }
         .onChange(of: location.latitude) {                       // the first GPS fix arrives async
             recomputeSunArc()
@@ -398,7 +421,8 @@ struct LevelScanView: View {
                 CoachPanel(role: warning.severe ? .windUrgent : .windWatch,
                            icon: "wind",
                            title: "Gusts to \(warning.peakMPH) mph around \(warning.timeLabel)",
-                           message: warning.severe ? "Bring the awning in." : "Keep an eye on the awning.")
+                           message: (warning.severe ? "Bring the awning in." : "Keep an eye on the awning.")
+                               + windFreshnessSuffix)
                     .accessibilityLabel("Wind warning. Gusts to \(warning.peakMPH) miles per hour around \(warning.timeLabel). \(warning.severe ? "Bring the awning in." : "Keep an eye on the awning.")")
             } else {
                 coachPanel(for: coachState)

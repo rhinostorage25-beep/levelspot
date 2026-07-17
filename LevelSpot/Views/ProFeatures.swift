@@ -187,6 +187,9 @@ struct SettingsSheet: View {
     // a 0.5° pillow target made level ground look mis-calibrated, trust costs more than comfort)
 
     @AppStorage("windAlertsOn") private var windAlertsOn = true
+    // The sun planner's mode, shared with the Level screen (which restores it at launch and
+    // keeps it in sync live). Empty string = off.
+    @AppStorage("sunMomentRaw") private var sunMomentRaw = ""
     // Denied notification permission would otherwise silently break the away-from-app half
     // of a paid feature while the toggle reads On — the footer must say what happened.
     @State private var notificationsDenied = false
@@ -194,6 +197,15 @@ struct SettingsSheet: View {
     @ViewBuilder private var comfortSection: some View {
         Section {
             if isPro {
+                Picker(selection: $sunMomentRaw) {
+                    Text("Off").tag("")
+                    ForEach(SunMoment.allCases) { moment in
+                        Text(moment.label).tag(moment.rawValue)
+                    }
+                } label: {
+                    Label("Sun and shade", systemImage: "sun.max")
+                }
+                .pickerStyle(.menu)
                 Toggle(isOn: $windAlertsOn) {
                     Label("Wind alerts", systemImage: "wind")
                 }
@@ -239,6 +251,15 @@ struct SettingsSheet: View {
                     Spacer()
                     Text("Apple Weather").font(.footnote).foregroundStyle(.secondary)
                 }
+            }
+            NavigationLink { PrivacyView() } label: {
+                Label("Privacy", systemImage: "hand.raised")
+            }
+            NavigationLink { AboutView() } label: {
+                Label("About LevelSpot", systemImage: "info.circle")
+            }
+            NavigationLink { HelpView() } label: {
+                Label("Help", systemImage: "questionmark.circle")
             }
         } header: {
             Text("App")
