@@ -600,7 +600,11 @@ struct LevelScanView: View {
     /// so two near-equal wheels swap places tick to tick and every ordered comparison below
     /// would churn on pure re-orderings that mean nothing.
     private var candidateMarkers: [Marker] {
-        guard isPhoneFlatEnough, let plan, plan.canLevel else { return [] }
+        // `!isLevel`: once the screen declares "Vehicle level", orange ramp demands are
+        // contradiction, not coaching. (Sleep tilt made this visible: on dead-level ground
+        // a 0.5° pillow target wants ~18 mm on the head-side wheels, which the stepped
+        // maths rounds up to "+40" — true, but noise inside the level band.)
+        guard isPhoneFlatEnough, let plan, plan.canLevel, !isLevel else { return [] }
         return plan.ramps.map {
             Marker(name: $0.wheelName, left: $0.side == .left, front: $0.end == .front,
                    mm: $0.stepMM ?? $0.liftMM)
