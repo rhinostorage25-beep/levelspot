@@ -8,7 +8,7 @@ import LevelSpotCore
 /// default geometry until the van is set up), the affiliate shop and the audio chime — the whole
 /// revenue path is free so every user reaches the "buy ramps that reach it" moment.
 /// PRO = the "Perfect Pitch" pack (see pro-pack-spec.md): all-day sun & shade planning with the
-/// day arc, pitch memory, sleep tilt, multi-vehicle, and the guided wheel-by-wheel flow for
+/// day arc, pitch memory, multi-vehicle, and the guided wheel-by-wheel flow for
 /// air/blocks/ratchet levellers. Fixed layout: the dial never moves and every text zone is a
 /// constant-height slot, so nothing jumps as the tilt crosses thresholds.
 struct LevelScanView: View {
@@ -23,8 +23,6 @@ struct LevelScanView: View {
 
     // Pro pack data: the saved pitches (vehicles live in SettingsSheet's own query now).
     @Query private var pitches: [PitchRecord]
-    // Sleep tilt — where the bed's head end is. Free tier ignores the stored value.
-    @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
 
     @State private var audio = AudioCoach()
     @State private var wind = WindService()    // awning wind alerts (Pro) — silent unless gusty
@@ -72,16 +70,10 @@ struct LevelScanView: View {
     private var isPro: Bool { entitlements.isPro }
 
     // MARK: - Derived
+    // (Sleep tilt was removed 16 Jul 2026: a 0.5° pillow target made level ground look
+    // mis-calibrated — the instrument targets TRUE level, always.)
 
-    /// Sleep tilt (Pro): the whole screen — dial, degrees, coaching — aims at a target that sits
-    /// `tiltDeg` high at the bed's head end, so "LEVEL" means "level, with your pillow up a touch".
-    private var sleepHeadEnd: SleepHeadEnd {
-        isPro ? (SleepHeadEnd(rawValue: sleepHeadEndRaw) ?? .off) : .off
-    }
-    private var effRollDeg: Double { motion.rollDeg - sleepHeadEnd.rollTargetDeg }
-    private var effPitchDeg: Double { motion.pitchDeg - sleepHeadEnd.pitchTargetDeg }
-
-    private var degOff: Double { max(abs(effRollDeg), abs(effPitchDeg)) }
+    private var degOff: Double { max(abs(motion.rollDeg), abs(motion.pitchDeg)) }
     private var isLevel: Bool { degOff < levelTolDeg }
 
     // Rough-default geometry — ramp coaching is FREE and works with zero setup. 1800mm track
@@ -105,14 +97,13 @@ struct LevelScanView: View {
     private var isPhoneFlatEnough: Bool { degOff <= 15 }
 
     /// Ramp plan — free for everyone. Uses the van's real geometry once set up, otherwise the
-    /// rough defaults above so coaching works from first launch with zero setup. Fed the
-    /// sleep-adjusted attitude so ramp targets land on the same shifted "level" as the dial.
+    /// rough defaults above so coaching works from first launch with zero setup.
     private var plan: LevelPlan? {
         guard isPhoneFlatEnough else { return nil }
         let wheelbase = config.map { Double($0.wheelbaseMM) } ?? Self.roughWheelbaseMM
         let trackFront = config.map { Double($0.trackFrontMM) } ?? Self.roughTrackMM
         let trackRear = config.map { Double($0.trackRearMM) } ?? Self.roughTrackMM
-        return RampAdvisor.plan(rollDeg: effRollDeg, pitchDeg: effPitchDeg,
+        return RampAdvisor.plan(rollDeg: motion.rollDeg, pitchDeg: motion.pitchDeg,
                                 trackFrontMM: trackFront, trackRearMM: trackRear,
                                 wheelbaseMM: wheelbase,
                                 ramp: effectiveRampSet, tolerance: .comfort)
@@ -601,9 +592,8 @@ struct LevelScanView: View {
     /// would churn on pure re-orderings that mean nothing.
     private var candidateMarkers: [Marker] {
         // `!isLevel`: once the screen declares "Vehicle level", orange ramp demands are
-        // contradiction, not coaching. (Sleep tilt made this visible: on dead-level ground
-        // a 0.5° pillow target wants ~18 mm on the head-side wheels, which the stepped
-        // maths rounds up to "+40" — true, but noise inside the level band.)
+        // contradiction, not coaching — inside the comfort band the plan's tighter tolerance
+        // can still nominate a step, and that reads as a calibration bug under a green card.
         guard isPhoneFlatEnough, let plan, plan.canLevel, !isLevel else { return [] }
         return plan.ramps.map {
             Marker(name: $0.wheelName, left: $0.side == .left, front: $0.end == .front,
@@ -702,27 +692,17 @@ struct LevelScanView: View {
         .offset(x: x, y: y)
     }
 
-    /// Opt-in hints — shown BELOW the dial (not overlapping it): the sun caption when the
-    /// planner's on, and a small reminder when the sleep tilt is shifting the target.
-    /// Guidance must never truncate, so these wrap instead of clipping.
+    /// Opt-in hint — shown BELOW the dial (not overlapping it): the sun caption when the
+    /// planner's on. Guidance must never truncate, so it wraps instead of clipping.
     @ViewBuilder private var sunHint: some View {
-        VStack(spacing: 5) {
-            if isPro, let moment = sunMoment {
-                Text(sunHintText(moment))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-            }
-            if sleepHeadEnd != .off {
-                Label("Sleep tilt · \(sleepHeadEnd.label.lowercased())", systemImage: "bed.double.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: Capsule())
-            }
+        if isPro, let moment = sunMoment {
+            Text(sunHintText(moment))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(sunAligned ? Theme.levelGreen : Theme.sun)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
         }
     }
 
@@ -753,9 +733,8 @@ struct LevelScanView: View {
     private var bubbleOffset: CGSize {
         let scale: CGFloat = 15
         let cap: CGFloat = 48
-        // Sleep-adjusted, so the bubble centres exactly when the shifted target is met.
-        let x = min(max(CGFloat(-effRollDeg) * scale, -cap), cap)
-        let y = min(max(CGFloat(-effPitchDeg) * scale, -cap), cap)
+        let x = min(max(CGFloat(-motion.rollDeg) * scale, -cap), cap)
+        let y = min(max(CGFloat(-motion.pitchDeg) * scale, -cap), cap)
         return CGSize(width: x, height: y)
     }
 
@@ -809,10 +788,9 @@ struct LevelScanView: View {
     }
 
     private var levelDirection: String {
-        // Sleep-adjusted: "nose high" means high relative to the (possibly shifted) target.
         var parts: [String] = []
-        if abs(effPitchDeg) > 0.3 { parts.append(effPitchDeg > 0 ? "nose high" : "nose low") }
-        if abs(effRollDeg) > 0.3 { parts.append(effRollDeg > 0 ? "left high" : "right high") }
+        if abs(motion.pitchDeg) > 0.3 { parts.append(motion.pitchDeg > 0 ? "nose high" : "nose low") }
+        if abs(motion.rollDeg) > 0.3 { parts.append(motion.rollDeg > 0 ? "left high" : "right high") }
         guard let first = parts.first else { return "Almost level" }
         return (first.prefix(1).uppercased() + first.dropFirst())
             + (parts.count > 1 ? " · " + parts[1] : "")

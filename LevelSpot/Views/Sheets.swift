@@ -33,8 +33,6 @@ struct PaywallSheet: View {
                             "On screen and by notification, before they reach your pitch.")
                     benefit("mappin.and.ellipse", "Remember previous pitches",
                             "Recall the exact setup when you return.")
-                    benefit("bed.double.fill", "Add a comfortable sleep tilt",
-                            "A gentle rise toward your pillow, built into the level target.")
                     benefit("car.2.fill", "Save multiple vehicles",
                             "Separate setups, one tap to switch.")
                     benefit("scope", "Follow wheel-by-wheel guidance",

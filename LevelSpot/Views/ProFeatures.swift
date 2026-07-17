@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import LevelSpotCore
 
-// The "Perfect Pitch" Pro pack — sun presets, sleep tilt, and pitch memory. All of it is
+// The Pro pack — sun presets, wind alerts, and pitch memory. All of it is
 // comfort-layer: nothing here is on the free money path (coaching/shop stay free).
 
 // MARK: - Sun presets (Pro)
@@ -61,55 +61,6 @@ enum SunMoment: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Sleep setup (Pro)
-
-/// Where the bed's HEAD end is. When set, the level target shifts ~0.5° so the head ends up a
-/// touch high (~15mm over a 2m bed) — imperceptible to a fridge, noticeable to a sleeper.
-/// Sign conventions match the core maths: pitch > 0 = nose high, roll > 0 = left high.
-enum SleepHeadEnd: String, CaseIterable, Identifiable {
-    case off, front, rear, left, right
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .off: return "Off"
-        case .front: return "Head at front"
-        case .rear: return "Head at rear"
-        case .left: return "Head on left"
-        case .right: return "Head on right"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .off: return "minus.circle"
-        case .front: return "arrow.up.to.line"
-        case .rear: return "arrow.down.to.line"
-        case .left: return "arrow.left.to.line"
-        case .right: return "arrow.right.to.line"
-        }
-    }
-
-    /// How high (deg) the head end should sit above true level.
-    static let tiltDeg = 0.5
-
-    var pitchTargetDeg: Double {
-        switch self {
-        case .front: return Self.tiltDeg
-        case .rear: return -Self.tiltDeg
-        default: return 0
-        }
-    }
-
-    var rollTargetDeg: Double {
-        switch self {
-        case .left: return Self.tiltDeg
-        case .right: return -Self.tiltDeg
-        default: return 0
-        }
-    }
-}
-
 // MARK: - Settings (the gear — ONE tap to everything)
 
 /// What a Settings row wants the Level screen to do after the sheet closes. Runs from the
@@ -122,7 +73,7 @@ enum SettingsAction {
 }
 
 /// The gear's ONE-TAP settings screen. Everything actionable is either done right here
-/// (switch vehicle, sleep tilt, language) or one row-tap away at the exact wizard step
+/// (switch vehicle, wind alerts) or one row-tap away at the exact wizard step
 /// (measurements / awning side / ramps) — the full six-step wizard only runs on first
 /// setup or when adding a vehicle. Free users see the locked Pro rows: honest upsell.
 struct SettingsSheet: View {
@@ -130,7 +81,6 @@ struct SettingsSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(EntitlementStore.self) private var entitlements
     @Query(sort: \VehicleConfig.updatedAt, order: .reverse) private var vehicles: [VehicleConfig]
-    @AppStorage("sleepHeadEnd") private var sleepHeadEndRaw = SleepHeadEnd.off.rawValue
     // Language deliberately has NO settings row: the app is English-only today, and showing
     // unavailable languages as selectable choices misleads. Restore a picker when at least
     // two localisations genuinely work (the stored appLanguageCode key is still respected).
@@ -232,32 +182,18 @@ struct SettingsSheet: View {
         }
     }
 
-    // MARK: Comfort (sleep tilt + wind alerts, inline — two taps, not a buried sheet)
+    // MARK: Comfort (wind alerts — sleep tilt was REMOVED 16 Jul 2026 on Jonathan's call:
+    // a 0.5° pillow target made level ground look mis-calibrated, trust costs more than comfort)
 
     @AppStorage("windAlertsOn") private var windAlertsOn = true
 
     @ViewBuilder private var comfortSection: some View {
         Section {
             if isPro {
-                Picker(selection: $sleepHeadEndRaw) {
-                    ForEach(SleepHeadEnd.allCases) { end in
-                        Text(end.label).tag(end.rawValue)
-                    }
-                } label: {
-                    Label("Sleep tilt", systemImage: "bed.double.fill")
-                }
-                .pickerStyle(.menu)
                 Toggle(isOn: $windAlertsOn) {
                     Label("Wind alerts", systemImage: "wind")
                 }
             } else {
-                Button { act(.paywall) } label: {
-                    HStack {
-                        Label("Sleep tilt — Pro", systemImage: "lock.fill").foregroundStyle(.primary)
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
-                    }
-                }
                 Button { act(.paywall) } label: {
                     HStack {
                         Label("Wind alerts — Pro", systemImage: "lock.fill").foregroundStyle(.primary)
@@ -269,7 +205,7 @@ struct SettingsSheet: View {
         } header: {
             Text("Comfort")
         } footer: {
-            Text("Sleep tilt adds a gentle 0.5° rise toward your pillow — levelling guidance adjusts automatically. Wind alerts warn you when forecast gusts may threaten your awning.")
+            Text("Get an alert when forecast gusts may threaten your awning.")
         }
     }
 
