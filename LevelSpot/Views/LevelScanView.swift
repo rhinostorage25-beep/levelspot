@@ -241,6 +241,13 @@ struct LevelScanView: View {
         .onChange(of: armed) { _, on in
             UIApplication.shared.isIdleTimerDisabled = on
         }
+        // The pitch "recipe" is only honest if the phone stayed put between Start and Done.
+        // Picking the phone up mid-guidance (>15°) voids it — otherwise carrying the phone
+        // to a level surface records the carry as "what it took to level here" (real report:
+        // phantom "Front left: about 110 mm" on a rampless, level pitch).
+        .onChange(of: isPhoneFlatEnough) { _, flat in
+            if armed && !flat { armPlan = nil }
+        }
         // One success haptic when the sun locks on target.
         .onChange(of: sunAligned) { was, now in
             if now && !was { Haptics.sunAligned() }
@@ -979,9 +986,13 @@ struct LevelScanView: View {
         // Wheels come back in the fixed order FL, FR, RL, RR (see LevelPlan).
         let lifts = recipe.wheels.map { Double($0.liftMM) }
         guard lifts.count == 4 else { return }
+        // Noise floor: corner lifts under ~20 mm are calibration residue and sensor wobble,
+        // not something anyone put a ramp under — store them as zero so the recall reads
+        // "No ramps were needed" instead of inventing phantom equipment.
+        let cleaned = lifts.map { $0 < 20 ? 0 : $0 }
         savePitchData = SavePitchData(latitude: lat, longitude: lon,
                                       heading: location.headingDeg.map { Int($0) },
-                                      fl: lifts[0], fr: lifts[1], rl: lifts[2], rr: lifts[3])
+                                      fl: cleaned[0], fr: cleaned[1], rl: cleaned[2], rr: cleaned[3])
     }
 
     /// The ramp marker, drawn as an arrowhead pointing UP the screen = the direction you drive.
